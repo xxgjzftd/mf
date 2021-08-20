@@ -1,0 +1,29 @@
+{
+  "name": "@mf/node",
+  "version": "1.0.0",
+  "description": "a tool for micro frontend dev and build",
+  "bin": {
+    "mf": "bin/mf.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [],
+  "engines": {
+    "node": ">=14.17.0"
+  },
+  "author": "xxgjzftd <xxgjzftd@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.6.1",
+    "type-fest": "^2.0.0",
+    "vue-router": "^4.0.11"
+  },
+  "dependencies": {
+    "axios": "^0.21.1",
+    "es-module-lexer": "^0.7.1",
+    "execa": "^5.1.1",
+    "fast-glob": "^3.2.7",
+    "magic-string": "^0.25.7",
+    "vite": "^2.5.0"
+  }
+}
