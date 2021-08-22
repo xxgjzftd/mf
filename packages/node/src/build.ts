@@ -10,7 +10,7 @@ import fg from 'fast-glob'
 import MagicString from 'magic-string'
 import { init, parse } from 'es-module-lexer'
 
-import { cached, isLocalModule, isRoutesModule, getLocalModuleName, getVendorPkgInfo } from './utils'
+import { cached, isLocalModule, isRoutesModule, getSrcPathes, getLocalModuleName, getVendorPkgInfo } from './utils'
 
 import type { OutputChunk } from 'rollup'
 import type { Plugin } from 'vite'
@@ -18,7 +18,7 @@ import type { Plugin } from 'vite'
 interface MetaModuleInfo {
   js: string
   css?: string
-  imports?: OutputChunk['importedBindings']
+  imports: OutputChunk['importedBindings']
 }
 
 interface MetaModules {
@@ -37,9 +37,11 @@ const require = createRequire(import.meta.url)
 
 const config = await vite.resolveConfig({ mode }, 'build')
 
+const SEP = '$mf'
 const BASE = config.base
 const DIST = config.build.outDir
-const SEP = '$mf'
+const ASSETS = config.build.assetsDir
+const VENDOR = 'vendor'
 
 const isLocal = BASE === '/'
 try {
@@ -70,10 +72,9 @@ if (meta.hash) {
         return { status, path } as Source
       }
     )
-    .filter(({ path }) => /packages\/.+?\/src\/.+/.test(path))
+    .filter(({ path }) => getSrcPathes().includes(path))
 } else {
-  // TODO: add support for resolving workspaces config from package.json and file extension config
-  sources = fg.sync('packages/*/src/**/*.{ts,tsx,vue}').map(
+  sources = getSrcPathes().map(
     (path) => {
       return { status: 'A', path }
     }
@@ -292,7 +293,7 @@ const plugins = {
         }
         return null
       },
-      generateBundle (options, bundle) {
+      generateBundle (_, bundle) {
         const info = getModuleInfo(mn)
         const fileNames = Object.keys(bundle)
         const js = fileNames.find((fileName) => (bundle[fileName] as OutputChunk).isEntry)!
@@ -316,5 +317,184 @@ const plugins = {
     }
   }
 }
+
+const builder = {
+  vendor: cached(
+    async (mn) => {
+      const info = vendorToDepInfoMap[mn]
+      const preBindings = preVendorToBindingsMap[mn]
+      if (info.dependents) {
+        await Promise.all(info.dependents.map((dep) => builder.vendor(dep)))
+        const curBindingsSet = new Set(curVendorToBindingsMap[mn])
+        info.dependents.forEach(
+          (dep) => {
+            const imports = meta.modules[dep].imports
+            Object.keys(imports).forEach(
+              (imported) => {
+                if (imported.startsWith(mn)) {
+                  let prefix = imported.length > mn.length ? imported + '/' : ''
+                  imports[imported]
+                    ? imports[imported].forEach((binding) => curBindingsSet.add(prefix + binding))
+                    : curBindingsSet.add(imported + '/')
+                }
+              }
+            )
+          }
+        )
+        curVendorToBindingsMap[mn] = Array.from(curBindingsSet).sort()
+      }
+      const curBindings = curVendorToBindingsMap[mn]
+      if (!preBindings || preBindings.toString() !== curBindings.toString()) {
+        remove(mn)
+        const input = resolve(VENDOR)
+        return vite.build(
+          {
+            mode,
+            publicDir: false,
+            build: {
+              rollupOptions: {
+                input,
+                output: {
+                  entryFileNames: `${ASSETS}/${mn}.[hash].js`,
+                  chunkFileNames: `${ASSETS}/${mn}.[hash].js`,
+                  assetFileNames: `${ASSETS}/${mn}.[hash][extname]`,
+                  format: 'es',
+                  manualChunks: {}
+                },
+                preserveEntrySignatures: 'allow-extension',
+                external: info.dependencies.map((dep) => new RegExp('^' + dep + '(/.+)?$'))
+              }
+            },
+            plugins: [
+              {
+                name: 'mf-vendor',
+                enforce: 'pre',
+                resolveId (source) {
+                  if (source === input) {
+                    return VENDOR
+                  }
+                },
+                load (id) {
+                  if (id === VENDOR) {
+                    let names: string[] = []
+                    let subs: string[] = []
+                    curBindings.forEach((binding) => (binding.includes('/') ? subs.push(binding) : names.push(binding)))
+                    return (
+                      (names.length
+                        ? names.includes('*')
+                          ? `export * from "${mn}";`
+                          : `export { ${names.toString()} } from "${mn}";`
+                        : '') +
+                      subs
+                        .map(
+                          (sub) => {
+                            const index = sub.lastIndexOf('/')
+                            const path = sub.slice(0, index)
+                            const binding = sub.slice(index + 1)
+                            return binding
+                              ? binding === '*'
+                                ? `export * as ${sub.replace(/\W/g, SEP)} from "${path}";`
+                                : `export { ${binding} as ` + `${sub.replace(/\W/g, SEP)} } from "${path}";`
+                              : `import "${path}";`
+                          }
+                        )
+                        .join('\n')
+                    )
+                  }
+                }
+              },
+              plugins.meta(mn)
+            ]
+          }
+        )
+      }
+    }
+  ),
+  // utils components pages containers
+  lib: cached(
+    async (mn: string) => {
+      return vite.build(
+        {
+          mode,
+          publicDir: false,
+          resolve: {
+            alias: getAlias(path)
+          },
+          build: {
+            rollupOptions: {
+              input: resolve(path),
+              output: {
+                entryFileNames: `${ASSETS}/[name].[hash].js`,
+                chunkFileNames: `${ASSETS}/[name].[hash].js`,
+                assetFileNames: `${ASSETS}/[name].[hash][extname]`,
+                format: 'es'
+              },
+              preserveEntrySignatures: 'allow-extension',
+              external: getExternal(path)
+            }
+          },
+          plugins: [vue(), plugins.meta(mn)]
+        }
+      )
+    }
+  ),
+  async container () {
+    const pkgId = Object.keys(config.packages).find((pkgId) => config.packages[pkgId].type === CONTAINER)
+    const mn = getPkgInfoFromPkgId(pkgId).name
+    containerName = mn
+    return (
+      built.has(mn) ||
+      (built.add(mn),
+      vite.build(
+        {
+          mode,
+          resolve: {
+            alias: getAliasFromPkgId(pkgId)
+          },
+          build: {
+            rollupOptions: {
+              external: getExternalFromPkgId(pkgId)
+            }
+          },
+          plugins: [vue(), plugins.meta(mn), routes()]
+        }
+      ))
+    )
+  }
+}
+
+const build = async ({ path, status }) => {
+  const pkg = getPkgInfo(path)
+  const { name, main } = pkg
+  const { type } = getPkgConfig(path)
+  if (status !== 'A') {
+    remove(getLocalModuleName(path))
+  }
+  if (isRoute(path)) {
+    return Promise.all([builder.lib(path), status === 'A' && builder.container()])
+  }
+  switch (type) {
+    case PAGES:
+      return builder.lib(path)
+    case COMPONENTS:
+    case UTILS:
+      return builder.lib(path.replace(/(?<=(.+?\/){2}).+/, main))
+    case CONTAINER:
+      return builder.container()
+    default:
+      throw new Error(`${name} type 未指定`)
+  }
+}
+
+await Promise.all(sources.map(build))
+
+const curVendorToBindingsMap = getVendorToBindingsMap()
+Object.keys(preVendorToBindingsMap).forEach(
+  (vendor) => {
+    if (!(vendor in curVendorToBindingsMap)) {
+      remove(vendor)
+    }
+  }
+)
 
 export { building, build }
