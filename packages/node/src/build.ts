@@ -20,7 +20,7 @@ import {
   getVendorPkgInfo,
   getAlias,
   getExternal
-} from './utils'
+} from '@utils'
 
 import type { OutputChunk } from 'rollup'
 import type { Plugin } from 'vite'
@@ -426,7 +426,7 @@ const builder = {
   ),
   // utils components pages containers
   lib: cached(
-    async (lmn: string) => {
+    async (lmn) => {
       return vite.build(
         {
           mode,

@@ -247,6 +247,7 @@ export {
   isLocalModule,
   isRoutesModule,
   getSrcPathes,
+  getRoutesMoudleNameToPagesMap,
   getRoutesMoudleNames,
   getLocalModuleName,
   getLocalModulePath,

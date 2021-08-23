@@ -1,22 +1,20 @@
-import fg from 'fast-glob'
-
-import { ROUTES, stringify } from '@utils.js'
+import { isRoutesModule, getRoutesMoudleNameToPagesMap, stringify } from '@utils.js'
 import { building } from '@build'
 
 import type { Plugin } from 'vite'
 
 const routes = (): Plugin => {
+  let rmn: string
   return {
     name: 'mf-routes',
     resolveId (source) {
-      if (source === ROUTES) {
-        return ROUTES
+      if (isRoutesModule(source)) {
+        return source
       }
     },
     async load (id) {
-      if (id === ROUTES) {
-        // TODO: respect user config
-        const pages = await fg('packages/*/src/pages/**/*.{vue,tsx}')
+      if (rmn && id === rmn) {
+        const pages = getRoutesMoudleNameToPagesMap()[rmn]
         // const
         const routeConfigs = pages.map(
           (path) => {
