@@ -10,7 +10,17 @@ import fg from 'fast-glob'
 import MagicString from 'magic-string'
 import { init, parse } from 'es-module-lexer'
 
-import { cached, isLocalModule, isRoutesModule, getSrcPathes, getLocalModuleName, getVendorPkgInfo } from './utils'
+import {
+  cached,
+  isLocalModule,
+  isRoutesModule,
+  getSrcPathes,
+  getLocalModuleName,
+  getLocalModulePath,
+  getVendorPkgInfo,
+  getAlias,
+  getExternal
+} from './utils'
 
 import type { OutputChunk } from 'rollup'
 import type { Plugin } from 'vite'
@@ -309,7 +319,11 @@ const plugins = {
               !meta.modules[imported] &&
               !sources.find((source) => getLocalModuleName(source.path) === imported)
             ) {
-              throw new Error(`'${mn}'中引用的'${imported}'模块不存在。`)
+              throw new Error(
+                `'${imported}' is imported by '${mn}',` +
+                  `but it doesn't exist.\n` +
+                  `please check if ${getLocalModulePath(imported)} exists.`
+              )
             }
           }
         )
@@ -412,17 +426,19 @@ const builder = {
   ),
   // utils components pages containers
   lib: cached(
-    async (mn: string) => {
+    async (lmn: string) => {
       return vite.build(
         {
           mode,
           publicDir: false,
           resolve: {
-            alias: getAlias(path)
+            // @ts-ignore because @rollup/plugin-alias' type doesn't allow function
+            // replacement, but its implementation does work with function values.
+            alias: getAlias(lmn)
           },
           build: {
             rollupOptions: {
-              input: resolve(path),
+              input: resolve(getLocalModulePath(lmn)),
               output: {
                 entryFileNames: `${ASSETS}/[name].[hash].js`,
                 chunkFileNames: `${ASSETS}/[name].[hash].js`,
@@ -430,37 +446,15 @@ const builder = {
                 format: 'es'
               },
               preserveEntrySignatures: 'allow-extension',
-              external: getExternal(path)
+              external: getExternal(lmn)
             }
           },
-          plugins: [vue(), plugins.meta(mn)]
+          plugins: [plugins.meta(lmn)]
         }
       )
     }
   ),
-  async container () {
-    const pkgId = Object.keys(config.packages).find((pkgId) => config.packages[pkgId].type === CONTAINER)
-    const mn = getPkgInfoFromPkgId(pkgId).name
-    containerName = mn
-    return (
-      built.has(mn) ||
-      (built.add(mn),
-      vite.build(
-        {
-          mode,
-          resolve: {
-            alias: getAliasFromPkgId(pkgId)
-          },
-          build: {
-            rollupOptions: {
-              external: getExternalFromPkgId(pkgId)
-            }
-          },
-          plugins: [vue(), plugins.meta(mn), routes()]
-        }
-      ))
-    )
-  }
+  routes: cached((rmn) => {})
 }
 
 const build = async ({ path, status }) => {

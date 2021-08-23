@@ -1,5 +1,6 @@
 import { resolve } from 'path'
 import { createRequire } from 'module'
+import { cwd } from 'process'
 
 import fg from 'fast-glob'
 import { normalizePath } from 'vite'
@@ -33,12 +34,14 @@ export interface MfConfig {
 const ROUTES = 'routes'
 const ROUTES_PACKAGE_NAME = '@mf/routes'
 const PACKAGE_JSON = 'package.json'
+const SRC = 'src'
 
 const config: MfConfig = await import(resolve('mf.config.js'))
 
 const require = createRequire(import.meta.url)
 
 const localModuleNameRegExp = new RegExp(`^${config.scope}/`)
+const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
 
 const once = <T extends (...args: any) => any>(fn: T): T => {
   let res: ReturnType<T>
@@ -96,26 +99,64 @@ const getRoutesMoudleNameToPagesMap = once(
   }
 )
 
+const getNormalizedPath = cached((ap) => normalizePath(ap.replace(cwd(), '')).slice(1))
+
 const getRoutesMoudleNames = cached(
   (path) => {
     const rmn2pm = getRoutesMoudleNameToPagesMap()
-    return Object.keys(rmn2pm).filter((routesMouduleName) => rmn2pm[routesMouduleName].find((page) => page === path))
+    return Object.keys(rmn2pm).filter((routesMouduleName) => rmn2pm[routesMouduleName].includes(path))
   }
 )
 
-const getPkgPath = cached((path) => getPkgPathes().find((pp) => path.startsWith(pp))!)
-const getPkgInfo = cached((path) => require(resolve(getPkgPath(path), PACKAGE_JSON)))
+const getPkgPath = cached(
+  (path) => {
+    const pp = getPkgPathes().find((pp) => path.startsWith(pp))
+    if (!pp) {
+      throw new Error(
+        `'${path}' is include in the building because of the 'glob' \n` +
+          JSON.stringify(config.glob) +
+          `\nspecified in the ${resolve('mf.config.js')}.\n` +
+          `but it doesn't exist in the workspaces which is specified in the ${resolve('package.json')}`
+      )
+    }
+    return pp.slice(0, -1)
+  }
+)
+
+const getPkgPathFromLmn = cached(
+  (lmn) => getNormalizedPath(require.resolve(`${getPkgName(lmn)}/${PACKAGE_JSON}`)).slice(0, -(PACKAGE_JSON.length + 1))
+)
+
+const getPkgInfo = cached((path): PackageJson => require(resolve(getPkgPath(path), PACKAGE_JSON)))
+
+const getPkgInfoFromLmn = cached((lmn): PackageJson => require(resolve(getPkgPathFromLmn(lmn), PACKAGE_JSON)))
+
+const getPkgName = cached((lmn) => lmn.split('/', 2).join('/'))
 
 const getLocalModuleName = cached(
   (path) => {
+    const pp = getPkgPath(path)
     const pkg = getPkgInfo(path)
     const { main, name } = pkg
+    if (!name || !name.startsWith(config.scope)) {
+      throw new Error(
+        `${resolve(pp, PACKAGE_JSON)} doesn't specified 'name' field or ` +
+          `the 'name' field doesn't start with ${config.scope}.`
+      )
+    }
     if (main && !isPage(path)) {
       return name
     } else {
-      return path.replace(/.+?\/.+?(?=\/)/, name)
+      return path.replace(pp, name)
     }
   }
+)
+
+const getLocalModulePath = cached(
+  (lmn) =>
+    getPkgName(lmn) === lmn
+      ? getNormalizedPath(resolve(getPkgPathFromLmn(lmn), require(`${getPkgName(lmn)}/${PACKAGE_JSON}`).main))
+      : getPkgPathFromLmn(lmn) + lmn.slice(getPkgName(lmn).length)
 )
 
 const getVendorPkgInfo = cached(
@@ -128,6 +169,55 @@ const getVendorPkgInfo = cached(
     }
     return pkgInfo
   }
+)
+
+const getAliasKey = cached((lmn) => '@' + lmn.split('/', 2)[1])
+
+const getAlias = cached(
+  (lmn) => {
+    const pn = getPkgName(lmn)
+    const pjp = require.resolve(`${pn}/${PACKAGE_JSON}`)
+    const { main } = require(pjp)
+    const ak = getAliasKey(lmn)
+    const rp = normalizePath(pjp).replace(PACKAGE_JSON, SRC)
+    return [
+      {
+        find: ak,
+        replacement (_m: string, _o: number, specifier: string) {
+          if (main) {
+            // means that some sources may be bundled multiple times in some edge case
+            return rp
+          } else {
+            // here pp means public path
+            const pp = specifier.replace(ak, `${pn}/${SRC}`)
+            const path = getNormalizedPath(require.resolve(pp))
+            return getSrcPathes().includes(path) ? pp : rp
+          }
+        }
+      }
+    ]
+  }
+)
+
+const getDevAlias = () => {
+  const alias: Record<string, string> = {}
+  getPkgPathes().forEach(
+    (pp) => {
+      const pjp = resolve(pp, PACKAGE_JSON)
+      const { name } = require(pjp)
+      const ak = getAliasKey(name)
+      alias[ak] = normalizePath(pjp).replace(PACKAGE_JSON, SRC)
+    }
+  )
+  return alias
+}
+
+const getExternal = cached(
+  (lmn) => [
+    ...Object.keys(getPkgInfoFromLmn(lmn).dependencies || {}).map((dep) => new RegExp('^' + dep + '(/.+)?$')),
+    localModuleNameRegExp,
+    routesModuleNameRegExp
+  ]
 )
 
 const stringify = (payload: any, replacer?: (key: string | number, value: any) => string): string => {
@@ -159,6 +249,10 @@ export {
   getSrcPathes,
   getRoutesMoudleNames,
   getLocalModuleName,
+  getLocalModulePath,
   getVendorPkgInfo,
+  getAlias,
+  getDevAlias,
+  getExternal,
   stringify
 }
