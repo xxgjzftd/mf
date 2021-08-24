@@ -17,7 +17,7 @@ interface RouteExtend<T> {
 interface RoutesOption {
   type: string
   glob: Parameters<typeof fg>
-  defaultDepth: number
+  depth: number
 }
 
 interface VueRoutesOption extends RoutesOption {
@@ -31,7 +31,6 @@ export interface MfConfig {
   routes?: Record<string, VueRoutesOption>
 }
 
-const ROUTES = 'routes'
 const ROUTES_PACKAGE_NAME = '@mf/routes'
 const PACKAGE_JSON = 'package.json'
 const SRC = 'src'
@@ -99,12 +98,14 @@ const getRoutesMoudleNameToPagesMap = once(
   }
 )
 
+const getRoutesOption = cached((rmn) => config.routes![rmn.slice(ROUTES_PACKAGE_NAME.length + 1)])
+
 const getNormalizedPath = cached((ap) => normalizePath(ap.replace(cwd(), '')).slice(1))
 
 const getRoutesMoudleNames = cached(
   (path) => {
     const rmn2pm = getRoutesMoudleNameToPagesMap()
-    return Object.keys(rmn2pm).filter((routesMouduleName) => rmn2pm[routesMouduleName].includes(path))
+    return Object.keys(rmn2pm).filter((rmn) => rmn2pm[rmn].includes(path))
   }
 )
 
@@ -136,8 +137,8 @@ const getPkgName = cached((lmn) => lmn.split('/', 2).join('/'))
 const getLocalModuleName = cached(
   (path) => {
     const pp = getPkgPath(path)
-    const pkg = getPkgInfo(path)
-    const { main, name } = pkg
+    const pi = getPkgInfo(path)
+    const { main, name } = pi
     if (!name || !name.startsWith(config.scope)) {
       throw new Error(
         `${resolve(pp, PACKAGE_JSON)} doesn't specified 'name' field or ` +
@@ -171,7 +172,9 @@ const getVendorPkgInfo = cached(
   }
 )
 
-const getAliasKey = cached((lmn) => '@' + lmn.split('/', 2)[1])
+const getPkgId = cached((lmn) => lmn.split('/', 2)[1])
+
+const getAliasKey = cached((lmn) => '@' + getPkgId(lmn))
 
 const getAlias = cached(
   (lmn) => {
@@ -220,7 +223,7 @@ const getExternal = cached(
   ]
 )
 
-const stringify = (payload: any, replacer?: (key: string | number, value: any) => string): string => {
+const stringify = (payload: any, replacer?: (key: string | number, value: any) => string | void): string => {
   const type = typeof payload
   switch (type) {
     case 'object':
@@ -240,7 +243,6 @@ const stringify = (payload: any, replacer?: (key: string | number, value: any) =
 }
 
 export {
-  ROUTES,
   config,
   cached,
   isPage,
@@ -248,10 +250,13 @@ export {
   isRoutesModule,
   getSrcPathes,
   getRoutesMoudleNameToPagesMap,
+  getRoutesOption,
   getRoutesMoudleNames,
+  getPkgInfo,
   getLocalModuleName,
   getLocalModulePath,
   getVendorPkgInfo,
+  getPkgId,
   getAlias,
   getDevAlias,
   getExternal,

@@ -1,10 +1,25 @@
-import { isRoutesModule, getRoutesMoudleNameToPagesMap, stringify } from '@utils.js'
+import {
+  isRoutesModule,
+  getRoutesMoudleNameToPagesMap,
+  stringify,
+  getLocalModuleName,
+  getRoutesOption,
+  getPkgId
+} from '@utils.js'
 import { building } from '@build'
 
 import type { Plugin } from 'vite'
+import type { RouteRecordRaw } from 'vue-router'
+
+interface BaseRoute {
+  id: string
+  path: string
+  name: string
+  depth: number
+  component: string
+}
 
 const routes = (): Plugin => {
-  let rmn: string
   return {
     name: 'mf-routes',
     resolveId (source) {
@@ -13,46 +28,72 @@ const routes = (): Plugin => {
       }
     },
     async load (id) {
-      if (rmn && id === rmn) {
-        const pages = getRoutesMoudleNameToPagesMap()[rmn]
-        // const
-        const routeConfigs = pages.map(
+      if (isRoutesModule(id)) {
+        const pages = getRoutesMoudleNameToPagesMap()[id]
+        const option = getRoutesOption(id)
+        const depth = option.depth
+        const lmnToPagesMap: Record<string, string[]> = {}
+        if (option.type !== 'vue') {
+          throw new Error(`currently, 'mf-routes' supports only 'vue-router' based routes.`)
+        }
+        pages.forEach(
           (path) => {
-            const raw = path.replace(/packages\/(.+?)\/src\/pages(?=\/)(.*?)(\/index)?\.(vue|tsx)/, '/$1$2')
-            const id = raw.replace(/(?<=\/)_/, ':')
-            return {
-              id,
-              path: id,
-              name: raw.slice(1).replace(/\//g, '-'),
-              component: path
-            }
+            const lmn = getLocalModuleName(path)
+            lmnToPagesMap[lmn] = lmnToPagesMap[lmn] || []
+            lmnToPagesMap[lmn].push(path)
           }
         )
-        config.routes['/'].children = routeConfigs
-        let routes = []
-        Object.keys(config.routes).forEach(
-          (id) => {
-            const userRouteConfig = config.routes[id]
-            const routeConfigIndex = routeConfigs.findIndex((routeConfig) => routeConfig.id === id)
-            let routeConfig = userRouteConfig
-            if (~routeConfigIndex) {
-              routeConfig = routeConfigs[routeConfigIndex]
-              Object.assign(routeConfig, userRouteConfig)
-            } else {
-              if (!routeConfig.component) {
-                throw new Error(`自定义路由${id}没有指定相应 'component'。`)
-              }
-              routeConfigs.push(Object.assign({ id, path: id }, routeConfig))
+        const brs: BaseRoute[] = []
+        Object.keys(lmnToPagesMap).forEach(
+          (lmn) => {
+            const pages = lmnToPagesMap[lmn]
+            const length = pages.length
+            if (!length) {
+              return
             }
-            if (routeConfig.root) {
-              ~routeConfigIndex ? routeConfigs.splice(routeConfigIndex, 1) : routeConfigs.pop()
-              routes.push(routeConfig)
+            let lca = pages[0].slice(0, pages[0].lastIndexOf('/'))
+            for (let index = 1; index < length; index++) {
+              const path = pages[index]
+              while (!path.startsWith(lca)) {
+                lca = lca.slice(0, lca.lastIndexOf('/'))
+              }
+            }
+            pages.forEach(
+              (path) => {
+                const raw = path.replace(lca, getPkgId(lmn)).replace(/(\/index)?(\..+?)?$/, '')
+                const re = option.extends.find((re) => re.id === id)
+
+                const br = Object.assign(
+                  {
+                    path: raw.replace(/(?<=\/)_/, ':'),
+                    name: raw.slice(1).replace(/\//g, '-'),
+                    depth: depth
+                  },
+                  re || {},
+                  { id: path, component: path }
+                )
+                brs.push(br)
+              }
+            )
+          }
+        )
+
+        const rrs: RouteRecordRaw[] = []
+        brs.forEach(
+          (br) => {
+            let depth = br.depth
+            if (depth === 0) {
+              rrs.push(br)
+            } else {
+              while (depth--) {
+                const parent = brs.find((inner) => inner.depth === depth && br.path.startsWith(inner.path))
+              }
             }
           }
         )
 
-        routes = stringify(
-          routes,
+        const code = stringify(
+          brs,
           (key, value) => {
             if (key === 'component') {
               return (
@@ -65,7 +106,7 @@ const routes = (): Plugin => {
           }
         )
 
-        return `export default ${routes}`
+        return `export default ${code}`
       }
     }
   }

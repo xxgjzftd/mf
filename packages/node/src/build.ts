@@ -19,7 +19,10 @@ import {
   getLocalModulePath,
   getVendorPkgInfo,
   getAlias,
-  getExternal
+  getExternal,
+  getPkgInfo,
+  isPage,
+  getRoutesMoudleNames
 } from '@utils'
 
 import type { OutputChunk } from 'rollup'
@@ -51,12 +54,13 @@ const SEP = '$mf'
 const BASE = config.base
 const DIST = config.build.outDir
 const ASSETS = config.build.assetsDir
+const ROUTES = 'routes'
 const VENDOR = 'vendor'
 
 const isLocal = BASE === '/'
 try {
   if (isLocal) {
-    meta = require(resolve(`${DIST}/meta.json`))
+    meta = require(resolve(DIST, `meta.json`))
   } else {
     meta = await axios.get(`${BASE}meta.json`).then((res) => res.data)
   }
@@ -213,7 +217,7 @@ const getVendorToBindingsMap = (isPre = false) => {
   return vendorToBindingsMap
 }
 
-const preVendorToBindingsMap = getVendorToBindingsMap(true)
+const pv2bm = getVendorToBindingsMap(true)
 
 const plugins = {
   meta (mn: string): Plugin {
@@ -336,10 +340,10 @@ const builder = {
   vendor: cached(
     async (mn) => {
       const info = vendorToDepInfoMap[mn]
-      const preBindings = preVendorToBindingsMap[mn]
+      const preBindings = pv2bm[mn]
       if (info.dependents) {
         await Promise.all(info.dependents.map((dep) => builder.vendor(dep)))
-        const curBindingsSet = new Set(curVendorToBindingsMap[mn])
+        const curBindingsSet = new Set(cv2bm[mn])
         info.dependents.forEach(
           (dep) => {
             const imports = meta.modules[dep].imports
@@ -355,9 +359,9 @@ const builder = {
             )
           }
         )
-        curVendorToBindingsMap[mn] = Array.from(curBindingsSet).sort()
+        cv2bm[mn] = Array.from(curBindingsSet).sort()
       }
-      const curBindings = curVendorToBindingsMap[mn]
+      const curBindings = cv2bm[mn]
       if (!preBindings || preBindings.toString() !== curBindings.toString()) {
         remove(mn)
         const input = resolve(VENDOR)
@@ -454,41 +458,101 @@ const builder = {
       )
     }
   ),
-  routes: cached((rmn) => {})
+  routes: cached(
+    async (rmn) => {
+      const input = resolve(ROUTES)
+      return vite.build(
+        {
+          mode,
+          publicDir: false,
+          build: {
+            rollupOptions: {
+              input,
+              output: {
+                entryFileNames: `${ASSETS}/${rmn}.[hash].js`,
+                chunkFileNames: `${ASSETS}/${rmn}.[hash].js`,
+                assetFileNames: `${ASSETS}/${rmn}.[hash][extname]`,
+                format: 'es'
+              },
+              preserveEntrySignatures: 'allow-extension'
+            }
+          },
+          plugins: [
+            {
+              name: 'mf-routes-build',
+              resolveId (source) {
+                if (source === input) {
+                  return rmn
+                }
+              }
+            },
+            plugins.meta(rmn)
+          ]
+        }
+      )
+    }
+  )
 }
 
-const build = async ({ path, status }) => {
-  const pkg = getPkgInfo(path)
-  const { name, main } = pkg
-  const { type } = getPkgConfig(path)
-  if (status !== 'A') {
+const build = async ({ path, status }: Source) => {
+  const pi = getPkgInfo(path)
+  const { main } = pi
+  if (status !== 'A' && !main) {
     remove(getLocalModuleName(path))
   }
-  if (isRoute(path)) {
-    return Promise.all([builder.lib(path), status === 'A' && builder.container()])
+  if (isPage(path)) {
+    return Promise.all([builder.lib(path), ...(status === 'A' ? getRoutesMoudleNames(path).map(builder.routes) : [])])
   }
-  switch (type) {
-    case PAGES:
-      return builder.lib(path)
-    case COMPONENTS:
-    case UTILS:
-      return builder.lib(path.replace(/(?<=(.+?\/){2}).+/, main))
-    case CONTAINER:
-      return builder.container()
-    default:
-      throw new Error(`${name} type 未指定`)
-  }
+  return builder.lib(getLocalModuleName(path))
 }
 
 await Promise.all(sources.map(build))
 
-const curVendorToBindingsMap = getVendorToBindingsMap()
-Object.keys(preVendorToBindingsMap).forEach(
+const cv2bm = getVendorToBindingsMap()
+Object.keys(pv2bm).forEach(
   (vendor) => {
-    if (!(vendor in curVendorToBindingsMap)) {
+    if (!(vendor in cv2bm)) {
       remove(vendor)
     }
   }
+)
+
+await Promise.all(
+  Object.keys(cv2bm)
+    .filter((vendor) => !vendorToDepInfoMap[vendor].dependencies.length)
+    .map((vendor) => builder.vendor(vendor))
+)
+
+await Promise.all(
+  [
+    writeFile(resolve(`${DIST}/meta.json`), JSON.stringify(meta)),
+    (built.has(containerName) || !mode
+      ? readFile(resolve(`${DIST}/index.html`), { encoding: 'utf8' })
+      : axios.get(`${base}index.html`).then((res) => res.data)
+    ).then(
+      (html) => {
+        let importmap = { imports: {} }
+        const imports = importmap.imports
+        Object.keys(meta.modules).forEach((mn) => (imports[mn] = base + meta.modules[mn].js))
+        importmap = `<script type="importmap-shim">${JSON.stringify(importmap)}</script>`
+        let modules =
+          `<script>window.mfe = window.mfe || {};` +
+          `window.mfe.base = '${base}';` +
+          `window.mfe.modules = ${JSON.stringify(meta.modules)}</script>`
+        return writeFile(
+          resolve(`${DIST}/index.html`),
+          html
+            .replace(
+              built.has(containerName)
+                ? '<!-- mfe placeholder -->'
+                : /\<script type="importmap-shim"\>.+?\<script\>window\.mfe.+?<\/script\>/,
+              importmap + modules
+            )
+            .replace(/\<script(.*)type="module"/g, '<script$1type="module-shim"')
+        )
+      }
+    )
+  ]
 )
 
 export { building, build }
