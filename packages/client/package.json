@@ -1,0 +1,10 @@
+{
+  "name": "@mf/client",
+  "version": "1.0.0",
+  "description": "a client side tool set for micro frontend",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [],
+  "author": "xxgjzftd <xxgjzftd@gmail.com>",
+  "license": "MIT"
+}

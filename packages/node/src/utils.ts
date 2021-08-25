@@ -17,6 +17,7 @@ interface RouteExtend<T> {
 interface RoutesOption {
   type: string
   glob: Parameters<typeof fg>
+  base?: string
   depth: number
 }
 
@@ -25,10 +26,16 @@ interface VueRoutesOption extends RoutesOption {
   extends: RouteExtend<RouteRecordRaw>[]
 }
 
+interface AppConfig {
+  name: string
+  conditon: () => boolean
+}
+
 export interface MfConfig {
   scope: string
   glob: Parameters<typeof fg>
   routes?: Record<string, VueRoutesOption>
+  apps: AppConfig[]
 }
 
 const ROUTES_PACKAGE_NAME = '@mf/routes'
@@ -36,6 +43,9 @@ const PACKAGE_JSON = 'package.json'
 const SRC = 'src'
 
 const config: MfConfig = await import(resolve('mf.config.js'))
+
+config.scope[0] !== '@' && (config.scope = '@' + config.scope)
+config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
 
 const require = createRequire(import.meta.url)
 
@@ -71,6 +81,23 @@ const getSanitizedFgOptions = (options: Parameters<typeof fg>[1]) =>
       unique: true
     }
   )
+
+const getAppPkgName = cached((an) => `${config.scope}/${an}`)
+
+const getApps = once(
+  () => {
+    config.apps.forEach(
+      (app) => {
+        try {
+          require(`${getAppPkgName(app.name)}/${PACKAGE_JSON}`)
+        } catch (error) {
+          throw new Error(`'${getAppPkgName(app.name)}' doesn't exist in this project.`)
+        }
+      }
+    )
+    return config.apps
+  }
+)
 
 const getSrcPathes = once(
   () => {
@@ -248,6 +275,8 @@ export {
   isPage,
   isLocalModule,
   isRoutesModule,
+  getAppPkgName,
+  getApps,
   getSrcPathes,
   getRoutesMoudleNameToPagesMap,
   getRoutesOption,

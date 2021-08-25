@@ -4,7 +4,9 @@ import {
   stringify,
   getLocalModuleName,
   getRoutesOption,
-  getPkgId
+  getPkgId,
+  getApps,
+  getAppPkgName
 } from '@utils.js'
 import { building } from '@build'
 
@@ -17,6 +19,7 @@ interface BaseRoute {
   name: string
   depth: number
   component: string
+  children?: BaseRoute[]
 }
 
 const routes = (): Plugin => {
@@ -32,6 +35,9 @@ const routes = (): Plugin => {
         const pages = getRoutesMoudleNameToPagesMap()[id]
         const option = getRoutesOption(id)
         const depth = option.depth
+        let base = option.base || ''
+        base[0] !== '/' && (base = '/' + base)
+        base[base.length - 1] !== '/' && (base = base + '/')
         const lmnToPagesMap: Record<string, string[]> = {}
         if (option.type !== 'vue') {
           throw new Error(`currently, 'mf-routes' supports only 'vue-router' based routes.`)
@@ -60,7 +66,7 @@ const routes = (): Plugin => {
             }
             pages.forEach(
               (path) => {
-                const raw = path.replace(lca, getPkgId(lmn)).replace(/(\/index)?(\..+?)?$/, '')
+                const raw = base + path.replace(lca, getPkgId(lmn)).replace(/(\/index)?(\..+?)?$/, '')
                 const re = option.extends.find((re) => re.id === id)
 
                 const br = Object.assign(
@@ -85,15 +91,21 @@ const routes = (): Plugin => {
             if (depth === 0) {
               rrs.push(br)
             } else {
-              while (depth--) {
-                const parent = brs.find((inner) => inner.depth === depth && br.path.startsWith(inner.path))
+              depth--
+              const parent = brs.find((inner) => inner.depth === depth && br.path.startsWith(inner.path))
+              if (!parent) {
+                throw new Error(
+                  `can not find parent route of '${br.component}',\n` + `the generated path of which is '${br.path}'.`
+                )
               }
+              parent.children = parent.children || []
+              parent.children.push(br)
             }
           }
         )
 
         const code = stringify(
-          brs,
+          rrs,
           (key, value) => {
             if (key === 'component') {
               return (
@@ -112,4 +124,29 @@ const routes = (): Plugin => {
   }
 }
 
-export { routes }
+const entry = (): Plugin => {
+  return {
+    name: 'mf-entry',
+    transformIndexHtml () {
+      return [
+        {
+          tag: 'script',
+          attrs: {
+            type: 'module-shim'
+          },
+          children: getApps()
+            .map(
+              (app) =>
+                `mf.register(` +
+                `"${app.name}", ${stringify(app.conditon)}, ` +
+                `() => mf.preload("${getAppPkgName(app.name)}"));`
+            )
+            .join(''),
+          injectTo: 'head'
+        }
+      ]
+    }
+  }
+}
+
+export { routes, entry }
