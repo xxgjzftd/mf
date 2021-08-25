@@ -1,22 +1,41 @@
+interface ModuleInfo {
+  js: string
+  css?: string
+  imports: Record<string, string[]>
+}
+
+interface MF {
+  base: string
+  modules: Record<string, ModuleInfo>
+  preload(mn: string): Promise<any>
+  register(name: string, condition: () => boolean, load: () => Promise<any>): void
+}
+
+interface Window {
+  mf: MF
+  importShim(mn: string): Promise<any>
+}
+
 const relList = document.createElement('link').relList
 const scriptRel = relList && relList.supports && relList.supports('modulepreload') ? 'modulepreload' : 'preload'
-const seen = {}
+const seen: Record<string, true> = {}
 
 const cached = <T extends (string: string) => any>(fn: T) => {
   const cache: Record<string, ReturnType<T>> = Object.create(null)
   return ((string) => cache[string] || (cache[string] = fn(string))) as T
 }
 
-const normalizeModuleName = cached(
+const getModuleName = cached(
   (mn) => {
     const index = mn.indexOf('/', mn[0] === '@' ? mn.indexOf('/') + 1 : 0)
     return ~index ? mn.slice(0, index) : mn
   }
 )
+
 const getDeps = cached(
   (mn) => {
-    let deps = []
-    const info = window.mfe.modules[mn] || window.mfe.modules[normalizeModuleName(mn)]
+    let deps: string[] = []
+    const info = window.mf.modules[mn] || window.mf.modules[getModuleName(mn)]
     deps.push(info.js)
     info.css && deps.push(info.css)
     if (info.imports) {
@@ -30,15 +49,15 @@ const getDeps = cached(
   }
 )
 
-window.mfe = window.mfe || {}
-window.mfe.preload = function preload (mn) {
+const mf = (window.mf = window.mf || {})
+mf.preload = function preload (mn) {
   const deps = getDeps(mn)
   return Promise.all(
     deps.map(
       (dep) => {
         if (dep in seen) return
         seen[dep] = true
-        const href = window.mfe.base + dep
+        const href = mf.base + dep
         const isCss = dep.endsWith('.css')
         const cssSelector = isCss ? '[rel="stylesheet"]' : ''
         if (document.querySelector(`link[href="${href}"]${cssSelector}`)) {
@@ -62,5 +81,7 @@ window.mfe.preload = function preload (mn) {
         }
       }
     )
-  ).then(() => importShim(mn))
+  ).then(() => window.importShim(mn))
 }
+
+mf.register
