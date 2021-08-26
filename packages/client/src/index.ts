@@ -9,6 +9,7 @@ interface MF {
   modules: Record<string, ModuleInfo>
   preload(mn: string): Promise<any>
   register(name: string, condition: () => boolean, load: () => Promise<any>): void
+  start(): Promise<any>
 }
 
 interface Window {
@@ -50,7 +51,7 @@ const getDeps = cached(
 )
 
 const mf = (window.mf = window.mf || {})
-mf.preload = function preload (mn) {
+mf.preload = function (mn) {
   const deps = getDeps(mn)
   return Promise.all(
     deps.map(
@@ -84,4 +85,69 @@ mf.preload = function preload (mn) {
   ).then(() => window.importShim(mn))
 }
 
-mf.register
+enum MFAppStatus {
+  NOT_LOADED,
+  NOT_MOUNTED,
+  MOUNTED
+}
+
+interface UserDefinedApp {
+  mount(): Promise<any>
+  unmount(): Promise<any>
+}
+
+interface BaseApp {
+  name: string
+  condition: () => boolean
+  load(): Promise<UserDefinedApp>
+  status: MFAppStatus
+}
+
+type MFApp = BaseApp & Partial<UserDefinedApp>
+
+const apps: MFApp[] = []
+
+mf.register = function (name, condition, load) {
+  apps.push(
+    {
+      name,
+      condition,
+      load,
+      status: MFAppStatus.NOT_LOADED
+    }
+  )
+}
+
+const getApps = () => {
+  const toBeMounted: MFApp[] = []
+  const toBeUnmounted: MFApp[] = []
+
+  apps.forEach(
+    (app) => {
+      const shouldBeActive = app.condition()
+      switch (app.status) {
+        case MFAppStatus.NOT_LOADED:
+        case MFAppStatus.NOT_MOUNTED:
+          shouldBeActive && toBeMounted.push(app)
+          break
+        case MFAppStatus.MOUNTED:
+          shouldBeActive || toBeUnmounted.push(app)
+      }
+    }
+  )
+
+  return { toBeMounted, toBeUnmounted }
+}
+
+mf.start = async function () {
+  const { toBeMounted, toBeUnmounted } = getApps()
+  await Promise.all(toBeUnmounted.map((app) => app.unmount!()))
+  toBeMounted.map(
+    async (app) => {
+      if (app.status === MFAppStatus.NOT_LOADED) {
+        Object.assign(app, await app.load())
+      }
+      await app.mount!()
+    }
+  )
+}
