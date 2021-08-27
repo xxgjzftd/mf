@@ -108,12 +108,7 @@ const routes = (): Plugin => {
           rrs,
           (key, value) => {
             if (key === 'component') {
-              return (
-                '() => ' +
-                (building
-                  ? `mfe.preload("${value.replace(/^packages/, '@vue-mfe')}")`
-                  : `import("${value.replace(/packages\/(.+?)\/src(.+)/, '@$1$2')}")`)
-              )
+              return '() => ' + (building ? `mf.load` : `import`) + `("${getLocalModuleName(value)}")`
             }
           }
         )
@@ -134,14 +129,15 @@ const entry = (): Plugin => {
           attrs: {
             type: 'module-shim'
           },
-          children: getApps()
-            .map(
-              (app) =>
-                `mf.register(` +
-                `"${app.name}", ${stringify(app.conditon)}, ` +
-                `() => mf.preload("${getAppPkgName(app.name)}"));`
-            )
-            .join(''),
+          children:
+            getApps()
+              .map(
+                (app) =>
+                  `mf.register(` +
+                  `"${getAppPkgName(app.name)}", ${stringify(app.conditon)}, ` +
+                  `() => ${building ? 'mf.load' : 'import'}("${getAppPkgName(app.name)}"));`
+              )
+              .join('') + `mf.start()`,
           injectTo: 'head'
         }
       ]

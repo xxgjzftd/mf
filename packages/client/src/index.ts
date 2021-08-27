@@ -7,7 +7,8 @@ interface ModuleInfo {
 interface MF {
   base: string
   modules: Record<string, ModuleInfo>
-  preload(mn: string): Promise<any>
+  load(mn: string): Promise<any>
+  unload(mn: string): void
   register(name: string, condition: () => boolean, load: () => Promise<any>): void
   start(): Promise<any>
 }
@@ -19,7 +20,7 @@ interface Window {
 
 const relList = document.createElement('link').relList
 const scriptRel = relList && relList.supports && relList.supports('modulepreload') ? 'modulepreload' : 'preload'
-const seen: Record<string, true> = {}
+const seen: Record<string, boolean> = {}
 
 const cached = <T extends (string: string) => any>(fn: T) => {
   const cache: Record<string, ReturnType<T>> = Object.create(null)
@@ -51,12 +52,12 @@ const getDeps = cached(
 )
 
 const mf = (window.mf = window.mf || {})
-mf.preload = function (mn) {
+mf.load = function (mn) {
   const deps = getDeps(mn)
   return Promise.all(
     deps.map(
       (dep) => {
-        if (dep in seen) return
+        if (seen[dep]) return
         seen[dep] = true
         const href = mf.base + dep
         const isCss = dep.endsWith('.css')
@@ -83,6 +84,22 @@ mf.preload = function (mn) {
       }
     )
   ).then(() => window.importShim(mn))
+}
+
+mf.unload = function (mn) {
+  const deps = getDeps(mn)
+  deps
+    .filter((dep) => dep.endsWith('.css'))
+    .forEach(
+      (dep) => {
+        if (seen[dep]) {
+          seen[dep] = false
+          const href = mf.base + dep
+          const link = document.querySelector(`link[href="${href}"][rel="stylesheet"]`)
+          link && link.remove()
+        }
+      }
+    )
 }
 
 enum MFAppStatus {
@@ -141,7 +158,14 @@ const getApps = () => {
 
 mf.start = async function () {
   const { toBeMounted, toBeUnmounted } = getApps()
-  await Promise.all(toBeUnmounted.map((app) => app.unmount!()))
+  await Promise.all(
+    toBeUnmounted.map(
+      async (app) => {
+        await app.unmount!()
+        return mf.unload(app.name)
+      }
+    )
+  )
   toBeMounted.map(
     async (app) => {
       if (app.status === MFAppStatus.NOT_LOADED) {
