@@ -1,13 +1,20 @@
 {
   "name": "@mf/node",
   "version": "1.0.0",
+  "type": "module",
   "description": "a tool for micro frontend dev and build",
   "bin": {
     "mf": "bin/mf.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": [],
+  "scripts": {
+    "build": "node ./build.js"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
   "engines": {
     "node": ">=14.17.0"
   },

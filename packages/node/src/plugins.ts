@@ -134,7 +134,7 @@ const entry = (): Plugin => {
               .map(
                 (app) =>
                   `mf.register(` +
-                  `"${getAppPkgName(app.name)}", ${stringify(app.conditon)}, ` +
+                  `"${getAppPkgName(app.name)}", ${stringify(app.predicate)}, ` +
                   `() => ${building ? 'mf.load' : 'import'}("${getAppPkgName(app.name)}"));`
               )
               .join('') + `mf.start()`,

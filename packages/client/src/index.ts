@@ -9,7 +9,7 @@ interface MF {
   modules: Record<string, ModuleInfo>
   load(mn: string): Promise<any>
   unload(mn: string): void
-  register(name: string, condition: () => boolean, load: () => Promise<any>): void
+  register(name: string, predicate: () => boolean, load: () => Promise<any>): void
   start(): Promise<any>
 }
 
@@ -115,7 +115,7 @@ interface UserDefinedApp {
 
 interface BaseApp {
   name: string
-  condition: () => boolean
+  predicate: () => boolean
   load(): Promise<UserDefinedApp>
   status: MFAppStatus
 }
@@ -124,11 +124,11 @@ type MFApp = BaseApp & Partial<UserDefinedApp>
 
 const apps: MFApp[] = []
 
-mf.register = function (name, condition, load) {
+mf.register = function (name, predicate, load) {
   apps.push(
     {
       name,
-      condition,
+      predicate,
       load,
       status: MFAppStatus.NOT_LOADED
     }
@@ -141,7 +141,7 @@ const getApps = () => {
 
   apps.forEach(
     (app) => {
-      const shouldBeActive = app.condition()
+      const shouldBeActive = app.predicate()
       switch (app.status) {
         case MFAppStatus.NOT_LOADED:
         case MFAppStatus.NOT_MOUNTED:
@@ -156,7 +156,7 @@ const getApps = () => {
   return { toBeMounted, toBeUnmounted }
 }
 
-mf.start = async function () {
+const route = async function () {
   const { toBeMounted, toBeUnmounted } = getApps()
   await Promise.all(
     toBeUnmounted.map(
@@ -166,12 +166,23 @@ mf.start = async function () {
       }
     )
   )
-  toBeMounted.map(
-    async (app) => {
-      if (app.status === MFAppStatus.NOT_LOADED) {
-        Object.assign(app, await app.load())
+  await Promise.all(
+    toBeMounted.map(
+      async (app) => {
+        if (app.status === MFAppStatus.NOT_LOADED) {
+          Object.assign(app, await app.load())
+        }
+        await app.mount!()
       }
-      await app.mount!()
-    }
+    )
   )
+}
+
+mf.start = route
+
+window.addEventListener('popstate', route)
+const pushState = history.pushState
+history.pushState = function (...args) {
+  pushState(...args)
+  route()
 }

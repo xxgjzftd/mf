@@ -28,7 +28,7 @@ interface VueRoutesOption extends RoutesOption {
 
 interface AppConfig {
   name: string
-  conditon: () => boolean
+  predicate: () => boolean
 }
 
 export interface MfConfig {
@@ -42,12 +42,12 @@ const ROUTES_PACKAGE_NAME = '@mf/routes'
 const PACKAGE_JSON = 'package.json'
 const SRC = 'src'
 
-const config: MfConfig = await import(resolve('mf.config.js'))
+const config: MfConfig = await import(resolve('mf.config.js')).then((res) => res.default)
 
 config.scope[0] !== '@' && (config.scope = '@' + config.scope)
 config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
 
-const require = createRequire(import.meta.url)
+const require = createRequire(resolve(PACKAGE_JSON))
 
 const localModuleNameRegExp = new RegExp(`^${config.scope}/`)
 const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
@@ -169,7 +169,7 @@ const getLocalModuleName = cached(
     if (!name || !name.startsWith(config.scope)) {
       throw new Error(
         `${resolve(pp, PACKAGE_JSON)} doesn't specified 'name' field or ` +
-          `the 'name' field doesn't start with ${config.scope}.`
+          `the 'name' field doesn't start with '${config.scope}'.`
       )
     }
     if (main && !isPage(path)) {
@@ -271,6 +271,7 @@ const stringify = (payload: any, replacer?: (key: string | number, value: any) =
 
 export {
   config,
+  require,
   cached,
   isPage,
   isLocalModule,

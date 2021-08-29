@@ -1,12 +1,14 @@
 {
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "author": "xxgjzftd <xxgjzftd@gmail.com>",
   "license": "MIT",
   "devDependencies": {
+    "esbuild": "^0.12.24",
     "prettier": "npm:@xxgjzftd/prettier",
     "typescript": "^4.3.5"
   }

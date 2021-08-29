@@ -1,6 +1,5 @@
 import { resolve } from 'path'
 import { writeFile, rm } from 'fs/promises'
-import { createRequire } from 'module'
 import { argv, exit } from 'process'
 
 import vite from 'vite'
@@ -10,6 +9,7 @@ import MagicString from 'magic-string'
 import { init, parse } from 'es-module-lexer'
 
 import {
+  require,
   cached,
   isLocalModule,
   isRoutesModule,
@@ -57,7 +57,6 @@ const build = async () => {
   building = true
   let meta: Meta
   const mode = argv[2]
-  const require = createRequire(import.meta.url)
 
   const config = await vite.resolveConfig({ mode }, 'build')
 
