@@ -2,7 +2,11 @@
   "name": "@mf/client",
   "version": "1.0.0",
   "description": "a client side tool set for micro frontend",
+  "scripts": {
+    "build": "node build.js"
+  },
   "main": "dist/index.js",
+  "type": "module",
   "types": "dist/index.d.ts",
   "files": [],
   "author": "xxgjzftd <xxgjzftd@gmail.com>",

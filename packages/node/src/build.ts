@@ -1,6 +1,6 @@
 import { resolve } from 'path'
 import { writeFile, rm } from 'fs/promises'
-import { argv, exit } from 'process'
+import { argv, exit, stdout } from 'process'
 
 import vite from 'vite'
 import execa from 'execa'
@@ -21,12 +21,14 @@ import {
   getExternal,
   getPkgInfo,
   isPage,
-  getRoutesMoudleNames
+  getRoutesMoudleNames,
+  getMFConfig
 } from '@utils'
+import * as utils from '@utils'
 
 import type { OutputChunk } from 'rollup'
 import type { Plugin } from 'vite'
-import { entry } from '@plugins'
+import { entry, routes } from '@plugins'
 
 interface MetaModuleInfo {
   js: string
@@ -50,6 +52,13 @@ interface DepInfo {
   dependencies: string[]
   dependents: string[]
 }
+
+process.on(
+  'uncaughtException',
+  (error) => {
+    console.log(error)
+  }
+)
 
 let building = false
 
@@ -100,6 +109,7 @@ const build = async () => {
     )
   }
   !sources.length && exit()
+  await execa('yarn').stdout?.pipe(stdout)
   meta.hash = execa.sync('git', ['rev-parse', '--short', 'HEAD']).stdout
 
   const remove = (mn: string) => {
@@ -434,7 +444,7 @@ const build = async () => {
     // utils components pages containers
     lib: cached(
       async (lmn) => {
-        return vite.build(
+        vite.mergeConfig(
           {
             mode,
             publicDir: false,
@@ -457,8 +467,10 @@ const build = async () => {
               }
             },
             plugins: [plugins.meta(lmn)]
-          }
+          },
+          getMFConfig().vite(lmn, utils)
         )
+        return vite.build()
       }
     ),
     routes: cached(
@@ -489,6 +501,7 @@ const build = async () => {
                   }
                 }
               },
+              routes(),
               plugins.meta(rmn)
             ]
           }
@@ -539,15 +552,16 @@ const build = async () => {
       async ({ path, status }: Source) => {
         const pi = getPkgInfo(path)
         const { main } = pi
+        const lmn = getLocalModuleName(path)
         if (status !== 'A' && !main) {
-          remove(getLocalModuleName(path))
+          remove(lmn)
         }
         if (isPage(path)) {
           return Promise.all(
-            [builder.lib(path), ...(status === 'A' ? getRoutesMoudleNames(path).map(builder.routes) : [])]
+            [builder.lib(lmn), ...(status === 'A' ? getRoutesMoudleNames(path).map(builder.routes) : [])]
           )
         }
-        return builder.lib(getLocalModuleName(path))
+        return builder.lib(lmn)
       }
     )
   )

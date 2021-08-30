@@ -171,8 +171,10 @@ const route = async function () {
       async (app) => {
         if (app.status === MFAppStatus.NOT_LOADED) {
           Object.assign(app, await app.load())
+          app.status = MFAppStatus.NOT_MOUNTED
         }
         await app.mount!()
+        app.status = MFAppStatus.MOUNTED
       }
     )
   )

@@ -6,12 +6,12 @@ import {
   getRoutesOption,
   getPkgId,
   getApps,
-  getAppPkgName
+  getAppPkgName,
+  getPkgName
 } from '@utils.js'
 import { building } from '@build'
 
 import type { Plugin } from 'vite'
-import type { RouteRecordRaw } from 'vue-router'
 
 interface BaseRoute {
   id: string
@@ -38,21 +38,18 @@ const routes = (): Plugin => {
         let base = option.base || ''
         base[0] !== '/' && (base = '/' + base)
         base[base.length - 1] !== '/' && (base = base + '/')
-        const lmnToPagesMap: Record<string, string[]> = {}
-        if (option.type !== 'vue') {
-          throw new Error(`currently, 'mf-routes' supports only 'vue-router' based routes.`)
-        }
+        const pnToPagesMap: Record<string, string[]> = {}
         pages.forEach(
           (path) => {
-            const lmn = getLocalModuleName(path)
-            lmnToPagesMap[lmn] = lmnToPagesMap[lmn] || []
-            lmnToPagesMap[lmn].push(path)
+            const pn = getPkgName(getLocalModuleName(path))
+            pnToPagesMap[pn] = pnToPagesMap[pn] || []
+            pnToPagesMap[pn].push(path)
           }
         )
         const brs: BaseRoute[] = []
-        Object.keys(lmnToPagesMap).forEach(
-          (lmn) => {
-            const pages = lmnToPagesMap[lmn]
+        Object.keys(pnToPagesMap).forEach(
+          (pn) => {
+            const pages = pnToPagesMap[pn]
             const length = pages.length
             if (!length) {
               return
@@ -66,8 +63,8 @@ const routes = (): Plugin => {
             }
             pages.forEach(
               (path) => {
-                const raw = base + path.replace(lca, getPkgId(lmn)).replace(/(\/index)?(\..+?)?$/, '')
-                const re = option.extends.find((re) => re.id === id)
+                const raw = base + path.replace(lca, getPkgId(pn)).replace(/(\/index)?(\..+?)?$/, '')
+                const re = option.extends.find((re) => re.id === path)
 
                 const br = Object.assign(
                   {
@@ -84,7 +81,7 @@ const routes = (): Plugin => {
           }
         )
 
-        const rrs: RouteRecordRaw[] = []
+        const rrs: BaseRoute[] = []
         brs.forEach(
           (br) => {
             let depth = br.depth

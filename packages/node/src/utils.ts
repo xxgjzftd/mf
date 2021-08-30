@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'url'
 import { resolve } from 'path'
 import { createRequire } from 'module'
 import { cwd } from 'process'
@@ -6,24 +7,19 @@ import fg from 'fast-glob'
 import { normalizePath } from 'vite'
 
 import type { PackageJson } from 'type-fest'
-import type { RouteRecordRaw } from 'vue-router'
+import type { UserConfig } from 'vite'
 
-interface RouteExtend<T> {
+interface RouteExtend {
   id: string
   depth: number
-  route: T
+  route: Record<string, any>
 }
 
 interface RoutesOption {
-  type: string
   glob: Parameters<typeof fg>
   base?: string
   depth: number
-}
-
-interface VueRoutesOption extends RoutesOption {
-  type: 'vue'
-  extends: RouteExtend<RouteRecordRaw>[]
+  extends: RouteExtend[]
 }
 
 interface AppConfig {
@@ -34,15 +30,16 @@ interface AppConfig {
 export interface MfConfig {
   scope: string
   glob: Parameters<typeof fg>
-  routes?: Record<string, VueRoutesOption>
   apps: AppConfig[]
+  routes?: Record<string, RoutesOption>
+  vite(lmn: string, utils: typeof import('./utils')): UserConfig
 }
 
 const ROUTES_PACKAGE_NAME = '@mf/routes'
 const PACKAGE_JSON = 'package.json'
 const SRC = 'src'
 
-const config: MfConfig = await import(resolve('mf.config.js')).then((res) => res.default)
+const config: MfConfig = await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default)
 
 config.scope[0] !== '@' && (config.scope = '@' + config.scope)
 config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
@@ -70,7 +67,9 @@ const isRoutesModule = cached((mn) => mn.startsWith(ROUTES_PACKAGE_NAME))
 
 const getSanitizedFgOptions = (options: Parameters<typeof fg>[1]) =>
   Object.assign(
-    {},
+    {
+      ignore: ['**/node_modules/**']
+    },
     options!,
     {
       absolute: false,
@@ -81,6 +80,8 @@ const getSanitizedFgOptions = (options: Parameters<typeof fg>[1]) =>
       unique: true
     }
   )
+
+const getMFConfig = once(() => config)
 
 const getAppPkgName = cached((an) => `${config.scope}/${an}`)
 
@@ -107,7 +108,11 @@ const getSrcPathes = once(
 )
 
 const getPkgPathes = once(
-  () => fg.sync(require(resolve(PACKAGE_JSON)).workspaces, { onlyDirectories: true, markDirectories: true })
+  () =>
+    fg.sync(
+      require(resolve(PACKAGE_JSON)).workspaces,
+      { ignore: ['**/node_modules/**'], onlyDirectories: true, markDirectories: true }
+    )
 )
 
 const getRoutesMoudleNameToPagesMap = once(
@@ -221,7 +226,7 @@ const getAlias = cached(
             // here pp means public path
             const pp = specifier.replace(ak, `${pn}/${SRC}`)
             const path = getNormalizedPath(require.resolve(pp))
-            return getSrcPathes().includes(path) ? pp : rp
+            return getSrcPathes().includes(path) ? `${pn}/${SRC}` : rp
           }
         }
       }
@@ -276,6 +281,7 @@ export {
   isPage,
   isLocalModule,
   isRoutesModule,
+  getMFConfig,
   getAppPkgName,
   getApps,
   getSrcPathes,
@@ -283,6 +289,7 @@ export {
   getRoutesOption,
   getRoutesMoudleNames,
   getPkgInfo,
+  getPkgName,
   getLocalModuleName,
   getLocalModulePath,
   getVendorPkgInfo,
