@@ -1,4 +1,4 @@
-import { resolve } from 'path'
+import { isAbsolute, resolve } from 'path'
 import { writeFile, rm } from 'fs/promises'
 import { argv, exit, stdout } from 'process'
 
@@ -9,26 +9,30 @@ import MagicString from 'magic-string'
 import { init, parse } from 'es-module-lexer'
 
 import {
+  PACKAGE_JSON,
   require,
   cached,
+  isPkg,
   isLocalModule,
   isRoutesModule,
   getSrcPathes,
+  getVendor,
   getLocalModuleName,
   getLocalModulePath,
   getVendorPkgInfo,
   getAlias,
   getExternal,
+  getPkgPathFromLmn,
   getPkgInfo,
   isPage,
   getRoutesMoudleNames,
   getMFConfig
 } from '@utils'
+import { entry, routes } from '@plugins'
 import * as utils from '@utils'
 
 import type { OutputChunk } from 'rollup'
-import type { Plugin } from 'vite'
-import { entry, routes } from '@plugins'
+import type { Plugin, UserConfig } from 'vite'
 
 interface MetaModuleInfo {
   js: string
@@ -162,12 +166,13 @@ const build = async () => {
             Object.keys(imports).forEach(
               (imported) => {
                 if (!isLocalModule(imported) && !isRoutesModule(imported)) {
-                  const index = imported.indexOf('/', imported[0] === '@' ? imported.indexOf('/') + 1 : 0)
-                  let vendor = ~index ? imported.slice(0, index) : imported
+                  let vendor = getVendor(imported)
                   let prefix = imported + '/'
                   const bindings = (vendorToBindingsSetMap[vendor] = vendorToBindingsSetMap[vendor] || new Set())
                   imports[imported].length
-                    ? imports[imported].forEach((binding) => bindings.add((~index ? prefix : '') + binding))
+                    ? imports[imported].forEach(
+                        (binding) => bindings.add((imported.length > vendor.length ? prefix : '') + binding)
+                      )
                     : bindings.add(prefix)
                 }
               }
@@ -240,17 +245,7 @@ const build = async () => {
           Object.keys(importedBindings).forEach(
             (imported) => {
               if (!isLocalModule(imported) && !isRoutesModule(imported)) {
-                let vendor = imported
-                const segs = imported.split('/')
-                if (imported[0] === '@') {
-                  if (segs.length > 2) {
-                    vendor = segs[0] + '/' + segs[1]
-                  }
-                } else {
-                  if (segs.length > 1) {
-                    vendor = segs[0]
-                  }
-                }
+                let vendor = getVendor(imported)
                 if (imported.length > vendor.length) {
                   pending.push([imported, vendor])
                 }
@@ -444,33 +439,49 @@ const build = async () => {
     // utils components pages containers
     lib: cached(
       async (lmn) => {
-        vite.mergeConfig(
-          {
-            mode,
-            publicDir: false,
-            resolve: {
-              // @ts-ignore because @rollup/plugin-alias' type doesn't allow function
-              // replacement, but its implementation does work with function values.
-              alias: getAlias(lmn)
-            },
-            build: {
-              rollupOptions: {
-                input: resolve(getLocalModulePath(lmn)),
-                output: {
-                  entryFileNames: `${ASSETS}/[name].[hash].js`,
-                  chunkFileNames: `${ASSETS}/[name].[hash].js`,
-                  assetFileNames: `${ASSETS}/[name].[hash][extname]`,
-                  format: 'es'
-                },
-                preserveEntrySignatures: 'allow-extension',
-                external: getExternal(lmn)
+        const c: UserConfig = {
+          mode,
+          publicDir: false,
+          resolve: {
+            // @ts-ignore because @rollup/plugin-alias' type doesn't allow function
+            // replacement, but its implementation does work with function values.
+            alias: getAlias(lmn)
+          },
+          build: {
+            rollupOptions: {
+              input: resolve(getLocalModulePath(lmn)),
+              output: {
+                entryFileNames: `${ASSETS}/[name].[hash].js`,
+                chunkFileNames: `${ASSETS}/[name].[hash].js`,
+                assetFileNames: `${ASSETS}/[name].[hash][extname]`,
+                format: 'es'
+              },
+              preserveEntrySignatures: 'allow-extension',
+              external: getExternal(lmn)
+            }
+          },
+          plugins: [
+            {
+              name: 'mf-lib',
+              async resolveId (source, importer, options) {
+                if (!source.startsWith('.') && !isAbsolute(source)) {
+                  throw new Error(
+                    `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
+                      `but it isn't declared in the dependencies field of the ` +
+                      resolve(getPkgPathFromLmn(lmn), PACKAGE_JSON)
+                  )
+                }
+                if (!isPkg(lmn)) {
+                  const resolution = await this.resolve(source, importer, Object.assign({ skipSelf: true }, options))
+                  const info = getModuleInfo(lmn)
+                }
+                return null
               }
             },
-            plugins: [plugins.meta(lmn)]
-          },
-          getMFConfig().vite(lmn, utils)
-        )
-        return vite.build()
+            plugins.meta(lmn)
+          ]
+        }
+        return vite.build(vite.mergeConfig(c, getMFConfig().vite(lmn, utils)))
       }
     ),
     routes: cached(

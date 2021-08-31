@@ -30,6 +30,7 @@ interface AppConfig {
 export interface MfConfig {
   scope: string
   glob: Parameters<typeof fg>
+  extensions: string[]
   apps: AppConfig[]
   routes?: Record<string, RoutesOption>
   vite(lmn: string, utils: typeof import('./utils')): UserConfig
@@ -61,6 +62,7 @@ const cached = <T extends (string: string) => any>(fn: T) => {
   return ((string) => cache[string] || (cache[string] = fn(string))) as T
 }
 
+const isPkg = cached((lmn) => getPkgName(lmn) === lmn)
 const isPage = cached((path) => !!getRoutesMoudleNames(path).length)
 const isLocalModule = cached((mn) => localModuleNameRegExp.test(mn))
 const isRoutesModule = cached((mn) => mn.startsWith(ROUTES_PACKAGE_NAME))
@@ -132,7 +134,7 @@ const getRoutesMoudleNameToPagesMap = once(
 
 const getRoutesOption = cached((rmn) => config.routes![rmn.slice(ROUTES_PACKAGE_NAME.length + 1)])
 
-const getNormalizedPath = cached((ap) => normalizePath(ap.replace(cwd(), '')).slice(1))
+const getNormalizedPath = cached((ap) => normalizePath(ap).replace(normalizePath(cwd()), '').slice(1))
 
 const getRoutesMoudleNames = cached(
   (path) => {
@@ -166,6 +168,8 @@ const getPkgInfoFromLmn = cached((lmn): PackageJson => require(resolve(getPkgPat
 
 const getPkgName = cached((lmn) => lmn.split('/', 2).join('/'))
 
+const getVendor = cached((mn) => mn.split('/', mn[0] === '@' ? 2 : 1).join('/'))
+
 const getLocalModuleName = cached(
   (path) => {
     const pp = getPkgPath(path)
@@ -187,7 +191,7 @@ const getLocalModuleName = cached(
 
 const getLocalModulePath = cached(
   (lmn) =>
-    getPkgName(lmn) === lmn
+    isPkg(lmn)
       ? getNormalizedPath(resolve(getPkgPathFromLmn(lmn), require(`${getPkgName(lmn)}/${PACKAGE_JSON}`).main))
       : getPkgPathFromLmn(lmn) + lmn.slice(getPkgName(lmn).length)
 )
@@ -223,10 +227,7 @@ const getAlias = cached(
             // means that some sources may be bundled multiple times in some edge case
             return rp
           } else {
-            // here pp means public path
-            const pp = specifier.replace(ak, `${pn}/${SRC}`)
-            const path = getNormalizedPath(require.resolve(pp))
-            return getSrcPathes().includes(path) ? `${pn}/${SRC}` : rp
+            return config.extensions.includes(specifier.slice(specifier.lastIndexOf('.'))) ? `${pn}/${SRC}` : rp
           }
         }
       }
@@ -275,9 +276,11 @@ const stringify = (payload: any, replacer?: (key: string | number, value: any) =
 }
 
 export {
+  PACKAGE_JSON,
   config,
   require,
   cached,
+  isPkg,
   isPage,
   isLocalModule,
   isRoutesModule,
@@ -288,8 +291,10 @@ export {
   getRoutesMoudleNameToPagesMap,
   getRoutesOption,
   getRoutesMoudleNames,
+  getPkgPathFromLmn,
   getPkgInfo,
   getPkgName,
+  getVendor,
   getLocalModuleName,
   getLocalModulePath,
   getVendorPkgInfo,
