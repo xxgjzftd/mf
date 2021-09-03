@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from 'path'
 import { writeFile, rm } from 'fs/promises'
 import { argv, exit, stdout } from 'process'
+import { createRequire } from 'module'
 
 import vite from 'vite'
 import execa from 'execa'
@@ -14,12 +15,11 @@ import {
   cached,
   isPkg,
   isLocalModule,
-  isRoutesModule,
+  isVendorModule,
   getSrcPathes,
   getVendor,
   getLocalModuleName,
   getLocalModulePath,
-  getVendorPkgInfo,
   getAlias,
   getExternal,
   getPkgPathFromLmn,
@@ -33,6 +33,7 @@ import * as utils from '@utils'
 
 import type { OutputChunk } from 'rollup'
 import type { Plugin, UserConfig } from 'vite'
+import type { PackageJson } from 'type-fest'
 
 interface MetaModuleInfo {
   js: string
@@ -47,6 +48,7 @@ interface MetaModules {
 interface Meta {
   modules: MetaModules
   hash?: string
+  version?: string
 }
 interface Source {
   status: 'A' | 'M' | 'D'
@@ -94,7 +96,7 @@ const build = async () => {
   meta.modules = meta.modules || {}
 
   let sources: Source[] = []
-  if (meta.hash) {
+  if (meta.hash && meta.version === require('@mf/node/package.json').version) {
     const { stdout } = execa.sync('git', ['diff', meta.hash, 'HEAD', '--name-status'])
     sources = stdout
       .split('\n')
@@ -140,8 +142,49 @@ const build = async () => {
 
   const getModuleInfo = cached((mn) => (meta.modules[mn] = meta.modules[mn] || {}))
 
+  const getParentModule = (mn: string) => Object.keys(meta.modules).find((pm) => meta.modules[pm].imports[mn])!
+
+  const getModulePath = cached(
+    (mn) => {
+      if (isLocalModule(mn)) {
+        return resolve(getLocalModulePath(mn))
+      } else {
+        // versioned vendor i.e. mn@version
+        const importer = getParentModule(mn)
+        const require = createRequire(getModulePath(importer))
+        return require.resolve(mn.slice(0, mn.lastIndexOf('@')))
+      }
+    }
+  )
+
+  const getVendorPkgInfo = (vendor: string, parent: string) => {
+    let pkgInfo: PackageJson
+    const require = createRequire(getModulePath(parent))
+    try {
+      pkgInfo = require(`${vendor}/${PACKAGE_JSON}`)
+    } catch (error) {
+      pkgInfo = require(vite
+        .normalizePath(require.resolve(vendor))
+        .replace(new RegExp(`(?<=/${vendor}/).+`), PACKAGE_JSON))
+    }
+    return pkgInfo
+  }
+
+  const getVersionedVendorPkgInfo = (vendor: string) => {
+    let pkgInfo: PackageJson
+    const require = createRequire(getModulePath(getParentModule(vendor)))
+    try {
+      pkgInfo = require(`${vendor}/${PACKAGE_JSON}`)
+    } catch (error) {
+      pkgInfo = require(vite
+        .normalizePath(require.resolve(vendor))
+        .replace(new RegExp(`(?<=/${vendor}/).+`), PACKAGE_JSON))
+    }
+    return pkgInfo
+  }
+
   const getAllDepsOfVendor = (vendor: string, vendors: Set<string>, deps = new Set<string>()) => {
-    const { dependencies } = getVendorPkgInfo(vendor)
+    const { dependencies } = getVersionedVendorPkgInfo(vendor)
     if (dependencies) {
       Object.keys(dependencies).forEach(
         (dep) => {
@@ -153,8 +196,11 @@ const build = async () => {
     return deps
   }
 
+  const getDepsTree = (vendor: string) => {}
+
   const vendorToRefCountMap: Record<string, number> = {}
   const vendorToDepInfoMap: Record<string, DepInfo> = {}
+  const vendorToParentMap: Record<string, string> = {}
 
   const getVendorToBindingsMap = (isPre = false) => {
     const vendorToBindingsSetMap: Record<string, Set<string>> = {}
@@ -165,10 +211,11 @@ const build = async () => {
           if (imports) {
             Object.keys(imports).forEach(
               (imported) => {
-                if (!isLocalModule(imported) && !isRoutesModule(imported)) {
+                if (isVendorModule(imported)) {
                   let vendor = getVendor(imported)
                   let prefix = imported + '/'
                   const bindings = (vendorToBindingsSetMap[vendor] = vendorToBindingsSetMap[vendor] || new Set())
+                  vendorToParentMap[vendor] = mn
                   imports[imported].length
                     ? imports[imported].forEach(
                         (binding) => bindings.add((imported.length > vendor.length ? prefix : '') + binding)
@@ -202,7 +249,7 @@ const build = async () => {
       vendors.forEach(
         (vendor) => {
           const info = (vendorToDepInfoMap[vendor] = vendorToDepInfoMap[vendor] || { dependencies: [], dependents: [] })
-          const { peerDependencies, dependencies } = getVendorPkgInfo(vendor)
+          const { peerDependencies, dependencies } = getVersionedVendorPkgInfo(vendor)
           if (peerDependencies) {
             info.dependencies = Object.keys(peerDependencies)
           }
@@ -244,7 +291,7 @@ const build = async () => {
           const pending: [string, string][] = []
           Object.keys(importedBindings).forEach(
             (imported) => {
-              if (!isLocalModule(imported) && !isRoutesModule(imported)) {
+              if (isVendorModule(imported)) {
                 let vendor = getVendor(imported)
                 if (imported.length > vendor.length) {
                   pending.push([imported, vendor])
@@ -324,6 +371,13 @@ const build = async () => {
           info.imports = importedBindings
           Object.keys(importedBindings).forEach(
             (imported) => {
+              if (isVendorModule(imported)) {
+                const bindings = importedBindings[imported]
+                Reflect.deleteProperty(importedBindings, imported)
+                const vendor = getVendor(imported)
+                importedBindings[vendor + '@' + getVendorPkgInfo(vendor, mn).version + imported.slice(vendor.length)] =
+                  bindings
+              }
               if (
                 isLocalModule(imported) &&
                 !meta.modules[imported] &&

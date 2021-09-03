@@ -66,6 +66,7 @@ const isPkg = cached((lmn) => getPkgName(lmn) === lmn)
 const isPage = cached((path) => !!getRoutesMoudleNames(path).length)
 const isLocalModule = cached((mn) => localModuleNameRegExp.test(mn))
 const isRoutesModule = cached((mn) => mn.startsWith(ROUTES_PACKAGE_NAME))
+const isVendorModule = cached((mn) => !isLocalModule(mn) && !isRoutesModule(mn))
 
 const getSanitizedFgOptions = (options: Parameters<typeof fg>[1]) =>
   Object.assign(
@@ -196,18 +197,6 @@ const getLocalModulePath = cached(
       : getPkgPathFromLmn(lmn) + lmn.slice(getPkgName(lmn).length)
 )
 
-const getVendorPkgInfo = cached(
-  (mn) => {
-    let pkgInfo: PackageJson
-    try {
-      pkgInfo = require(`${mn}/${PACKAGE_JSON}`)
-    } catch (error) {
-      pkgInfo = require(normalizePath(require.resolve(mn)).replace(new RegExp(`(?<=${mn}).+`), '/' + PACKAGE_JSON))
-    }
-    return pkgInfo
-  }
-)
-
 const getPkgId = cached((lmn) => lmn.split('/', 2)[1])
 
 const getAliasKey = cached((lmn) => '@' + getPkgId(lmn))
@@ -284,6 +273,7 @@ export {
   isPage,
   isLocalModule,
   isRoutesModule,
+  isVendorModule,
   getMFConfig,
   getAppPkgName,
   getApps,
@@ -297,7 +287,6 @@ export {
   getVendor,
   getLocalModuleName,
   getLocalModulePath,
-  getVendorPkgInfo,
   getPkgId,
   getAlias,
   getDevAlias,
