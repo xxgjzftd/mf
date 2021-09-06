@@ -27,20 +27,30 @@ interface AppConfig {
   predicate: () => boolean
 }
 
-export interface MfConfig {
+export interface MFConfig {
   scope: string
   glob: Parameters<typeof fg>
   extensions: string[]
   apps: AppConfig[]
   routes?: Record<string, RoutesOption>
-  vite(lmn: string, utils: typeof import('./utils')): UserConfig
+  vite?(lmn: string, utils: typeof import('./utils')): UserConfig
+  /**
+   * Abbreviation for resolve vendor package.json path.
+   * A escape hatch for vendor which package.json path couldn't resolved by mf.
+   * It's unnecessary when there is no resolve error.
+   * @param vendor
+   * @param importer May be local module or versioned vendor. Actually, it's a key of meta.modules.
+   * @param parent The path of the importer, when importer is a local module. Otherwise, it's the path of importer's package.json.
+   * @param utils
+   */
+  rvpjp?(vendor: string, importer: string, parent: string, utils: typeof import('./utils')): string | null
 }
 
 const ROUTES_PACKAGE_NAME = '@mf/routes'
 const PACKAGE_JSON = 'package.json'
 const SRC = 'src'
 
-const config: MfConfig = await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default)
+const config: MFConfig = await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default)
 
 config.scope[0] !== '@' && (config.scope = '@' + config.scope)
 config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
@@ -83,8 +93,6 @@ const getSanitizedFgOptions = (options: Parameters<typeof fg>[1]) =>
       unique: true
     }
   )
-
-const getMFConfig = once(() => config)
 
 const getAppPkgName = cached((an) => `${config.scope}/${an}`)
 
@@ -171,6 +179,10 @@ const getPkgName = cached((lmn) => lmn.split('/', 2).join('/'))
 
 const getVendor = cached((mn) => mn.split('/', mn[0] === '@' ? 2 : 1).join('/'))
 
+const getVersionedVendor = (vendor: string, version: string) => vendor + '@' + version
+
+const getUnversionedVendor = cached((vv) => vv.slice(0, vv.lastIndexOf('@')))
+
 const getLocalModuleName = cached(
   (path) => {
     const pp = getPkgPath(path)
@@ -250,12 +262,15 @@ const stringify = (payload: any, replacer?: (key: string | number, value: any) =
   switch (type) {
     case 'object':
       const isArray = Array.isArray(payload)
-      let content = isArray
-        ? payload.map((value: any, index: number) => (replacer && replacer(index, value)) ?? stringify(value, replacer))
-        : Object.keys(payload).map(
-            (key) => `${key}:${(replacer && replacer(key, payload[key])) ?? stringify(payload[key], replacer)}`
-          )
-      content = content.join(',')
+      let content = (
+        isArray
+          ? payload.map(
+              (value: any, index: number) => (replacer && replacer(index, value)) ?? stringify(value, replacer)
+            )
+          : Object.keys(payload).map(
+              (key) => `${key}:${(replacer && replacer(key, payload[key])) ?? stringify(payload[key], replacer)}`
+            )
+      ).join(',')
       return (replacer && replacer('', payload)) ?? isArray ? `[${content}]` : `{${content}}`
     case 'function':
       return payload.toString()
@@ -274,7 +289,6 @@ export {
   isLocalModule,
   isRoutesModule,
   isVendorModule,
-  getMFConfig,
   getAppPkgName,
   getApps,
   getSrcPathes,
@@ -285,6 +299,8 @@ export {
   getPkgInfo,
   getPkgName,
   getVendor,
+  getVersionedVendor,
+  getUnversionedVendor,
   getLocalModuleName,
   getLocalModulePath,
   getPkgId,
