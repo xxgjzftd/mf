@@ -181,13 +181,19 @@ const build = async () => {
     [vv: string]: DepsTree
   }
 
+  const versionedVendorToDepsTreeMap: Record<string, DepsTree> = {}
   const getDepsTree = (vendors: string[], importer: string) => {
     const dt: DepsTree = {}
     vendors.forEach(
       (vendor) => {
         const { version, dependencies = {}, peerDependencies = {} } = getVendorPkgInfo(vendor, importer)
         const vv = getVersionedVendor(vendor, version!)
-        dt[vv] = getDepsTree(Object.keys(Object.assign({}, dependencies, peerDependencies)), vv)
+        dt[vv] =
+          versionedVendorToDepsTreeMap[vv] ||
+          (versionedVendorToDepsTreeMap[vv] = getDepsTree(
+            Object.keys(Object.assign({}, dependencies, peerDependencies)),
+            vv
+          ))
       }
     )
     return dt
@@ -224,25 +230,19 @@ const build = async () => {
         }
       }
     )
-    let vendors = new Set(Object.keys(versionedVendorToBindingsSetMap))
+    let vvs = new Set(Object.keys(versionedVendorToBindingsSetMap))
     if (!isPre) {
-      vendors.forEach(
-        (vendor) => {
-          getAllDepsOfVendor(vendor, vendors).forEach(
-            (dep) => {
-              vendorToRefCountMap[dep] = (vendorToRefCountMap[dep] || 0) + 1
-            }
-          )
-        }
-      )
+      const dt: DepsTree = {}
+      vvs.forEach((vv) => Object.assign(dt, getDepsTree([getUnversionedVendor(vv)], versionedVendorToImporterMap[vv])))
+
       Object.keys(vendorToRefCountMap).forEach(
         (vendor) => {
           if (vendorToRefCountMap[vendor] > 1) {
-            vendors.add(vendor)
+            vvs.add(vendor)
           }
         }
       )
-      vendors.forEach(
+      vvs.forEach(
         (vendor) => {
           const info = (vendorToDepInfoMap[vendor] = vendorToDepInfoMap[vendor] || { dependencies: [], dependents: [] })
           const { peerDependencies, dependencies } = getVersionedVendorPkgInfo(vendor)
@@ -250,7 +250,7 @@ const build = async () => {
             info.dependencies = Object.keys(peerDependencies)
           }
           if (dependencies) {
-            Object.keys(dependencies).forEach((dep) => vendors.has(dep) && info.dependencies.push(dep))
+            Object.keys(dependencies).forEach((dep) => vvs.has(dep) && info.dependencies.push(dep))
           }
           info.dependencies.forEach(
             (dep) => {
@@ -263,7 +263,7 @@ const build = async () => {
       )
     }
     const versionedVendorToBindingsMap: Record<string, string[]> = {}
-    vendors.forEach(
+    vvs.forEach(
       (vendor) => {
         if (versionedVendorToBindingsSetMap[vendor]) {
           versionedVendorToBindingsMap[vendor] = Array.from(versionedVendorToBindingsSetMap[vendor])
