@@ -14,11 +14,12 @@ import {
   config as mc,
   require,
   cached,
-  isPkg,
   isPage,
   isLocalModule,
   isVendorModule,
+  isIndependentModule,
   getSrcPathes,
+  getNormalizedPath,
   getVendor,
   getLocalModuleName,
   getLocalModulePath,
@@ -26,8 +27,8 @@ import {
   getExternal,
   getVersionedVendor,
   getUnversionedVendor,
+  getPkgPath,
   getPkgPathFromLmn,
-  getPkgInfo,
   getRoutesMoudleNames
 } from '@utils'
 import { entry, routes } from '@plugins'
@@ -40,6 +41,7 @@ import type { PackageJson } from 'type-fest'
 interface MetaModuleInfo {
   js: string
   css?: string
+  sources?: string[]
   imports: OutputChunk['importedBindings']
 }
 
@@ -164,43 +166,21 @@ const build = async () => {
     return require(getVendorPkgJsonPath(vendor, importer))
   }
 
-  const getAllDepsOfVendor = (vendor: string, vendors: Set<string>, deps = new Set<string>()) => {
-    const { dependencies } = getVersionedVendorPkgInfo(vendor)
-    if (dependencies) {
-      Object.keys(dependencies).forEach(
-        (dep) => {
-          deps.add(dep)
-          !vendors.has(dep) && getAllDepsOfVendor(dep, vendors, deps)
-        }
-      )
-    }
-    return deps
+  const versionedVendorToImportersMap: Record<string, string[]> = {}
+  const versionedVendorToPkgInfoMap: Record<string, PackageJson> = {}
+  const traverseVendorDeps = (vendor: string, importer: string) => {
+    const pi = getVendorPkgInfo(vendor, importer)
+    const { version, dependencies = {}, peerDependencies = {} } = pi
+    const vv = getVersionedVendor(vendor, version!)
+    const hasTraversed = !!versionedVendorToImportersMap[vv]
+    const importers = (versionedVendorToImportersMap[vv] = versionedVendorToImportersMap[vv] || new Set())
+    importers.push(importer)
+    versionedVendorToPkgInfoMap[vv] = pi
+    hasTraversed ||
+      Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach((vendor) => traverseVendorDeps(vendor, vv))
   }
 
-  interface DepsTree {
-    [vv: string]: DepsTree
-  }
-
-  const versionedVendorToDepsTreeMap: Record<string, DepsTree> = {}
-  const getDepsTree = (vendors: string[], importer: string) => {
-    const dt: DepsTree = {}
-    vendors.forEach(
-      (vendor) => {
-        const { version, dependencies = {}, peerDependencies = {} } = getVendorPkgInfo(vendor, importer)
-        const vv = getVersionedVendor(vendor, version!)
-        dt[vv] =
-          versionedVendorToDepsTreeMap[vv] ||
-          (versionedVendorToDepsTreeMap[vv] = getDepsTree(
-            Object.keys(Object.assign({}, dependencies, peerDependencies)),
-            vv
-          ))
-      }
-    )
-    return dt
-  }
-
-  const vendorToRefCountMap: Record<string, number> = {}
-  const vendorToDepInfoMap: Record<string, DepInfo> = {}
+  const versionedVendorToDepInfoMap: Record<string, DepInfo> = {}
   const versionedVendorToImporterMap: Record<string, string> = {}
 
   const getVersionedVendorToBindingsMap = (isPre = false) => {
@@ -232,31 +212,26 @@ const build = async () => {
     )
     let vvs = new Set(Object.keys(versionedVendorToBindingsSetMap))
     if (!isPre) {
-      const dt: DepsTree = {}
-      vvs.forEach((vv) => Object.assign(dt, getDepsTree([getUnversionedVendor(vv)], versionedVendorToImporterMap[vv])))
-
-      Object.keys(vendorToRefCountMap).forEach(
-        (vendor) => {
-          if (vendorToRefCountMap[vendor] > 1) {
-            vvs.add(vendor)
-          }
-        }
+      vvs.forEach((vv) => traverseVendorDeps(getUnversionedVendor(vv), versionedVendorToImporterMap[vv]))
+      Object.keys(versionedVendorToImportersMap).forEach(
+        (vv) => versionedVendorToImportersMap[vv].length > 1 && vvs.add(vv)
       )
       vvs.forEach(
-        (vendor) => {
-          const info = (vendorToDepInfoMap[vendor] = vendorToDepInfoMap[vendor] || { dependencies: [], dependents: [] })
-          const { peerDependencies, dependencies } = getVersionedVendorPkgInfo(vendor)
-          if (peerDependencies) {
-            info.dependencies = Object.keys(peerDependencies)
-          }
-          if (dependencies) {
-            Object.keys(dependencies).forEach((dep) => vvs.has(dep) && info.dependencies.push(dep))
-          }
-          info.dependencies.forEach(
-            (dep) => {
-              const depInfo = (vendorToDepInfoMap[dep] = vendorToDepInfoMap[dep] || {})
-              depInfo.dependents = depInfo.dependents || []
-              depInfo.dependents.push(vendor)
+        (vv) => {
+          const di = (versionedVendorToDepInfoMap[vv] = versionedVendorToDepInfoMap[vv] || {
+            dependencies: [],
+            dependents: []
+          })
+          const { peerDependencies = {}, dependencies = {} } = versionedVendorToPkgInfoMap[vv]
+          di.dependencies = []
+          Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
+            (dep) => vvs.has(dep) && di.dependencies.push(dep)
+          )
+          di.dependencies.forEach(
+            (ivv) => {
+              const idi = (versionedVendorToDepInfoMap[ivv] = versionedVendorToDepInfoMap[ivv] || {})
+              idi.dependents = idi.dependents || []
+              idi.dependents.push(vv)
             }
           )
         }
@@ -264,12 +239,12 @@ const build = async () => {
     }
     const versionedVendorToBindingsMap: Record<string, string[]> = {}
     vvs.forEach(
-      (vendor) => {
-        if (versionedVendorToBindingsSetMap[vendor]) {
-          versionedVendorToBindingsMap[vendor] = Array.from(versionedVendorToBindingsSetMap[vendor])
-          versionedVendorToBindingsMap[vendor].sort()
+      (vv) => {
+        if (versionedVendorToBindingsSetMap[vv]) {
+          versionedVendorToBindingsMap[vv] = Array.from(versionedVendorToBindingsSetMap[vv])
+          versionedVendorToBindingsMap[vv].sort()
         } else {
-          versionedVendorToBindingsMap[vendor] = []
+          versionedVendorToBindingsMap[vv] = []
         }
       }
     )
@@ -396,7 +371,7 @@ const build = async () => {
   const builder = {
     vendor: cached(
       async (mn) => {
-        const info = vendorToDepInfoMap[mn]
+        const info = versionedVendorToDepInfoMap[mn]
         const preBindings = pvv2bm[mn]
         if (info.dependents) {
           await Promise.all(info.dependents.map((dep) => builder.vendor(dep)))
@@ -522,9 +497,25 @@ const build = async () => {
                       resolve(getPkgPathFromLmn(lmn), PACKAGE_JSON)
                   )
                 }
-                if (!isPkg(lmn)) {
-                  const resolution = await this.resolve(source, importer, Object.assign({ skipSelf: true }, options))
-                  const info = getModuleInfo(lmn)
+                const resolution = await this.resolve(source, importer, Object.assign({ skipSelf: true }, options))
+                if (resolution) {
+                  const path = getNormalizedPath(resolution.id)
+                  if (getPkgPathFromLmn(lmn) !== getPkgPath(path)) {
+                    throw new Error(
+                      `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
+                        `importing source cross package is not allowed.`
+                    )
+                  }
+                  if (importer && isIndependentModule(path)) {
+                    return {
+                      id: getLocalModuleName(path)!,
+                      external: true
+                    }
+                  }
+                  const mi = getModuleInfo(lmn)
+                  mi.sources = mi.sources || []
+                  mi.sources.push(path)
+                  return resolution
                 }
                 return null
               }
@@ -613,18 +604,24 @@ const build = async () => {
   await Promise.all(
     sources.map(
       async ({ path, status }: Source) => {
-        const pi = getPkgInfo(path)
-        const { main } = pi
         const lmn = getLocalModuleName(path)
-        if (status !== 'A' && !main) {
-          remove(lmn)
+        if (status === 'D') {
+          return lmn && remove(lmn)
         }
-        if (isPage(path)) {
+        if (lmn) {
+          if (isPage(path)) {
+            return Promise.all(
+              [builder.lib(lmn), ...(status === 'A' ? getRoutesMoudleNames(path).map(builder.routes) : [])]
+            )
+          }
+          return builder.lib(lmn)
+        } else {
           return Promise.all(
-            [builder.lib(lmn), ...(status === 'A' ? getRoutesMoudleNames(path).map(builder.routes) : [])]
+            Object.keys(meta.modules)
+              .filter((mn) => meta.modules[mn].sources?.includes(path))
+              .map((lmn) => builder.lib(lmn))
           )
         }
-        return builder.lib(lmn)
       }
     )
   )
@@ -640,7 +637,7 @@ const build = async () => {
 
   await Promise.all(
     Object.keys(cvv2bm)
-      .filter((vendor) => !vendorToDepInfoMap[vendor].dependencies.length)
+      .filter((vendor) => !versionedVendorToDepInfoMap[vendor].dependencies.length)
       .map((vendor) => builder.vendor(vendor))
   )
 

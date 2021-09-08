@@ -29,7 +29,14 @@ interface AppConfig {
 
 export interface MFConfig {
   scope: string
+  /**
+   * Specified sources which participate the build. The build will respect their changes.
+   */
   glob: Parameters<typeof fg>
+  /**
+   * Source which has extension specified in this config and its pkg doesn't have the `main` field
+   * will be built as a independent module.
+   */
   extensions: string[]
   apps: AppConfig[]
   routes?: Record<string, RoutesOption>
@@ -74,9 +81,11 @@ const cached = <T extends (string: string) => any>(fn: T) => {
 
 const isPkg = cached((lmn) => getPkgName(lmn) === lmn)
 const isPage = cached((path) => !!getRoutesMoudleNames(path).length)
+const isAsset = cached((path) => !config.extensions.includes(path.slice(path.lastIndexOf('.'))))
 const isLocalModule = cached((mn) => localModuleNameRegExp.test(mn))
 const isRoutesModule = cached((mn) => mn.startsWith(ROUTES_PACKAGE_NAME))
 const isVendorModule = cached((mn) => !isLocalModule(mn) && !isRoutesModule(mn))
+const isIndependentModule = cached((path) => getLocalModuleName(path) && !isPkg(getLocalModuleName(path)!))
 
 const getSanitizedFgOptions = (options: Parameters<typeof fg>[1]) =>
   Object.assign(
@@ -126,6 +135,8 @@ const getPkgPathes = once(
     )
 )
 
+const getNormalizedPath = cached((ap) => normalizePath(ap).replace(normalizePath(cwd()), '').slice(1))
+
 const getRoutesMoudleNameToPagesMap = once(
   () => {
     const rmn2pm: Record<string, string[]> = {}
@@ -142,8 +153,6 @@ const getRoutesMoudleNameToPagesMap = once(
 )
 
 const getRoutesOption = cached((rmn) => config.routes![rmn.slice(ROUTES_PACKAGE_NAME.length + 1)])
-
-const getNormalizedPath = cached((ap) => normalizePath(ap).replace(normalizePath(cwd()), '').slice(1))
 
 const getRoutesMoudleNames = cached(
   (path) => {
@@ -185,6 +194,9 @@ const getUnversionedVendor = cached((vv) => vv.slice(0, vv.lastIndexOf('@')))
 
 const getLocalModuleName = cached(
   (path) => {
+    if (isAsset(path)) {
+      return null
+    }
     const pp = getPkgPath(path)
     const pi = getPkgInfo(path)
     const { main, name } = pi
@@ -194,8 +206,14 @@ const getLocalModuleName = cached(
           `the 'name' field doesn't start with '${config.scope}'.`
       )
     }
-    if (main && !isPage(path)) {
-      return name
+    if (main) {
+      if (getNormalizedPath(resolve(pp, main)) === path) {
+        return name
+      }
+      if (isPage(path)) {
+        return path.replace(pp, name)
+      }
+      return null
     } else {
       return path.replace(pp, name)
     }
@@ -217,20 +235,13 @@ const getAlias = cached(
   (lmn) => {
     const pn = getPkgName(lmn)
     const pjp = require.resolve(`${pn}/${PACKAGE_JSON}`)
-    const { main } = require(pjp)
     const ak = getAliasKey(lmn)
-    const rp = normalizePath(pjp).replace(PACKAGE_JSON, SRC)
+    const rd = normalizePath(pjp).replace(PACKAGE_JSON, SRC)
     return [
       {
         find: ak,
-        replacement (_m: string, _o: number, specifier: string) {
-          if (main) {
-            // means that some sources may be bundled multiple times in some edge case
-            return rp
-          } else {
-            return config.extensions.includes(specifier.slice(specifier.lastIndexOf('.'))) ? `${pn}/${SRC}` : rp
-          }
-        }
+        replacement: (_m: string, _o: number, specifier: string) =>
+          isIndependentModule(specifier.replace(ak, getNormalizedPath(rd))) ? `${pn}/${SRC}` : rd
       }
     ]
   }
@@ -289,12 +300,15 @@ export {
   isLocalModule,
   isRoutesModule,
   isVendorModule,
+  isIndependentModule,
   getAppPkgName,
   getApps,
   getSrcPathes,
+  getNormalizedPath,
   getRoutesMoudleNameToPagesMap,
   getRoutesOption,
   getRoutesMoudleNames,
+  getPkgPath,
   getPkgPathFromLmn,
   getPkgInfo,
   getPkgName,
