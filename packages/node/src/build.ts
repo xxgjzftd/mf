@@ -335,7 +335,7 @@ const build = async () => {
                       }
                       if (vendorToVersionedVendorsMap[vendor].length > 1) {
                         content = content.replace(
-                          new RegExp(`(["'])${vendor}\1`),
+                          new RegExp(`(["'])${vendor}\\1`),
                           getVersionedVendor(vendor, getVendorPkgInfo(vendor, mn).version!)
                         )
                       }
