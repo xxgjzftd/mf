@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from 'path'
+import { dirname, isAbsolute, resolve } from 'path'
 import { writeFile, rm } from 'fs/promises'
 import { argv, exit, stdout } from 'process'
 import { createRequire } from 'module'
@@ -19,7 +19,9 @@ import {
   isVendorModule,
   isIndependentModule,
   getSrcPathes,
+  getPkgPathes,
   getNormalizedPath,
+  getPkgName,
   getVendor,
   getLocalModuleName,
   getLocalModulePath,
@@ -147,8 +149,15 @@ const build = async () => {
   const getModuleInfo = cached((mn) => (meta.modules[mn] = meta.modules[mn] || {}))
 
   const versionedVendorToPkgJsonPathMap: Record<string, string> = {}
-  const getVendorPkgJsonPath = (vendor: string, importer: string) => {
-    const parent = isLocalModule(importer) ? getLocalModulePath(importer) : versionedVendorToPkgJsonPathMap[importer]
+  const getRequireParent = cached(
+    (importer) =>
+      isLocalModule(importer)
+        ? require.resolve(`${getPkgName(importer)}/${PACKAGE_JSON}`)
+        : versionedVendorToPkgJsonPathMap[importer]
+  )
+
+  const getVendorPkgInfo = (vendor: string, importer: string): PackageJson => {
+    let parent = getRequireParent(importer)
     let path = mc.rvpjp && mc.rvpjp(vendor, importer, parent, utils)
     if (!path) {
       const require = createRequire(parent)
@@ -159,11 +168,7 @@ const build = async () => {
       }
     }
     versionedVendorToPkgJsonPathMap[getVersionedVendor(vendor, require(path).version)] = path
-    return path
-  }
-
-  const getVendorPkgInfo = (vendor: string, importer: string): PackageJson => {
-    return require(getVendorPkgJsonPath(vendor, importer))
+    return require(path)
   }
 
   const versionedVendorToImportersMap: Record<string, string[]> = {}
@@ -173,7 +178,7 @@ const build = async () => {
     const { version, dependencies = {}, peerDependencies = {} } = pi
     const vv = getVersionedVendor(vendor, version!)
     const hasTraversed = !!versionedVendorToImportersMap[vv]
-    const importers = (versionedVendorToImportersMap[vv] = versionedVendorToImportersMap[vv] || new Set())
+    const importers = (versionedVendorToImportersMap[vv] = versionedVendorToImportersMap[vv] || [])
     importers.push(importer)
     versionedVendorToPkgInfoMap[vv] = pi
     hasTraversed ||
@@ -181,7 +186,6 @@ const build = async () => {
   }
 
   const versionedVendorToDepInfoMap: Record<string, DepInfo> = {}
-  const versionedVendorToImporterMap: Record<string, string> = {}
 
   const getVersionedVendorToBindingsMap = (isPre = false) => {
     const versionedVendorToBindingsSetMap: Record<string, Set<string>> = {}
@@ -193,16 +197,10 @@ const build = async () => {
             Object.keys(imports).forEach(
               (imported) => {
                 if (isVendorModule(imported)) {
-                  let vv = getVendor(imported)
-                  let prefix = imported + '/'
+                  const vv = imported
                   const bindings = (versionedVendorToBindingsSetMap[vv] =
                     versionedVendorToBindingsSetMap[vv] || new Set())
-                  isPre || (versionedVendorToImporterMap[vv] = mn)
-                  imports[imported].length
-                    ? imports[imported].forEach(
-                        (binding) => bindings.add((imported.length > vv.length ? prefix : '') + binding)
-                      )
-                    : bindings.add(prefix)
+                  imports[vv].forEach(bindings.add)
                 }
               }
             )
@@ -212,7 +210,6 @@ const build = async () => {
     )
     let vvs = new Set(Object.keys(versionedVendorToBindingsSetMap))
     if (!isPre) {
-      vvs.forEach((vv) => traverseVendorDeps(getUnversionedVendor(vv), versionedVendorToImporterMap[vv]))
       Object.keys(versionedVendorToImportersMap).forEach(
         (vv) => versionedVendorToImportersMap[vv].length > 1 && vvs.add(vv)
       )
@@ -251,6 +248,26 @@ const build = async () => {
     return versionedVendorToBindingsMap
   }
 
+  getPkgPathes().forEach(
+    (pp) => {
+      const pjp = resolve(pp, PACKAGE_JSON)
+      const pi = require(pjp)
+      const { dependencies = {}, peerDependencies = {} } = pi
+      Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
+        (vendor) => traverseVendorDeps(vendor, require(pjp).name)
+      )
+    }
+  )
+
+  const vendorToVersionedVendorsMap: Record<string, string[]> = {}
+  Object.keys(versionedVendorToImportersMap).forEach(
+    (vv) => {
+      const vendor = getUnversionedVendor(vv)
+      vendorToVersionedVendorsMap[vendor] = vendorToVersionedVendorsMap[vendor] || []
+      vendorToVersionedVendorsMap[vendor].push(vv)
+    }
+  )
+
   const pvv2bm = getVersionedVendorToBindingsMap(true)
 
   const plugins = {
@@ -264,7 +281,7 @@ const build = async () => {
             (imported) => {
               if (isVendorModule(imported)) {
                 let vendor = getVendor(imported)
-                if (imported.length > vendor.length) {
+                if (imported.length > vendor.length || vendorToVersionedVendorsMap[vendor].length > 1) {
                   pending.push([imported, vendor])
                 }
               }
@@ -280,43 +297,47 @@ const build = async () => {
                   ({ n: mn, ss, se }) => {
                     if (mn === imported) {
                       const bindings = importedBindings[imported]
-                      let content = ''
-                      if (bindings.length) {
-                        const bindingToNameMap: Record<string, string> = {}
-                        const d = code
-                          .slice(ss, se)
-                          .replace(/\n/g, '')
-                          .match(/(?<=^import).+?(?=from)/)![0]
-                          .trim()
-                        const m = d.match(/^{(.+)}$/)
-                        if (m) {
-                          m[1]
-                            .split(',')
-                            .map(
-                              (s) =>
-                                s
-                                  .trim()
-                                  .split(' as ')
-                                  .map((v) => v.trim())
-                            )
-                            .forEach(([binding, name]) => (bindingToNameMap[binding] = name || binding))
-                        } else if (d[0] === '*') {
-                          bindingToNameMap['*'] = d.split(' as ')[1].trim()
-                        } else {
-                          bindingToNameMap.default = d
-                        }
+                      let content = code.slice(ss, se).replace(/\n/g, ' ')
+                      if (imported.length > vendor.length) {
+                        if (bindings.length) {
+                          const bindingToNameMap: Record<string, string> = {}
+                          const d = content.match(/(?<=^import).+?(?=from)/)![0].trim()
+                          const m = d.match(/^{(.+)}$/)
+                          if (m) {
+                            m[1]
+                              .split(',')
+                              .map(
+                                (s) =>
+                                  s
+                                    .trim()
+                                    .split(' as ')
+                                    .map((v) => v.trim())
+                              )
+                              .forEach(([binding, name]) => (bindingToNameMap[binding] = name || binding))
+                          } else if (d[0] === '*') {
+                            bindingToNameMap['*'] = d.split(' as ')[1].trim()
+                          } else {
+                            bindingToNameMap.default = d
+                          }
 
-                        content =
-                          `import { ` +
-                          bindings
-                            .map(
-                              (binding) =>
-                                `${imported}/${binding}`.replace(/\W/g, SEP) + ` as ${bindingToNameMap[binding]}`
-                            )
-                            .join(',') +
-                          `} from "${vendor}"`
-                      } else {
-                        content = `import "${vendor}"`
+                          content =
+                            `import { ` +
+                            bindings
+                              .map(
+                                (binding) =>
+                                  `${imported}/${binding}`.replace(/\W/g, SEP) + ` as ${bindingToNameMap[binding]}`
+                              )
+                              .join(',') +
+                            `} from "${vendor}"`
+                        } else {
+                          content = `import "${vendor}"`
+                        }
+                      }
+                      if (vendorToVersionedVendorsMap[vendor].length > 1) {
+                        content = content.replace(
+                          new RegExp(`(["'])${vendor}\1`),
+                          getVersionedVendor(vendor, getVendorPkgInfo(vendor, mn).version!)
+                        )
                       }
                       ms.overwrite(ss, se, content)
                     }
@@ -339,16 +360,16 @@ const build = async () => {
           info.js = js
           css && (info.css = css)
           const { importedBindings } = bundle[js] as OutputChunk
-          info.imports = importedBindings
+          info.imports = {}
           Object.keys(importedBindings).forEach(
             (imported) => {
               if (isVendorModule(imported)) {
-                const bindings = importedBindings[imported]
-                Reflect.deleteProperty(importedBindings, imported)
+                const rbs = importedBindings[imported]
                 const vendor = getVendor(imported)
-                importedBindings[
-                  getVersionedVendor(vendor, getVendorPkgInfo(vendor, mn).version!) + imported.slice(vendor.length)
-                ] = bindings
+                const vv = getVersionedVendor(vendor, getVendorPkgInfo(vendor, mn).version!)
+                const bindings = (info.imports[vv] = info.imports[vv] || [])
+                const prefix = imported.length > vendor.length || !rbs.length ? imported + '/' : ''
+                rbs.length ? rbs.forEach((rb) => bindings.push(prefix + rb)) : bindings.push(prefix)
               }
               if (
                 isLocalModule(imported) &&
@@ -370,44 +391,31 @@ const build = async () => {
 
   const builder = {
     vendor: cached(
-      async (mn) => {
-        const info = versionedVendorToDepInfoMap[mn]
-        const preBindings = pvv2bm[mn]
+      async (vv) => {
+        const info = versionedVendorToDepInfoMap[vv]
+        const preBindings = pvv2bm[vv]
         if (info.dependents) {
-          await Promise.all(info.dependents.map((dep) => builder.vendor(dep)))
-          const curBindingsSet = new Set(cvv2bm[mn])
-          info.dependents.forEach(
-            (dep) => {
-              const imports = meta.modules[dep].imports
-              Object.keys(imports).forEach(
-                (imported) => {
-                  if (imported.startsWith(mn)) {
-                    let prefix = imported.length > mn.length ? imported + '/' : ''
-                    imports[imported]
-                      ? imports[imported].forEach((binding) => curBindingsSet.add(prefix + binding))
-                      : curBindingsSet.add(imported + '/')
-                  }
-                }
-              )
-            }
-          )
-          cvv2bm[mn] = Array.from(curBindingsSet).sort()
+          await Promise.all(info.dependents.map(builder.vendor))
+          const curBindingsSet = new Set(cvv2bm[vv])
+          info.dependents.forEach((ivv) => meta.modules[ivv].imports[vv]?.forEach(curBindingsSet.add))
+          cvv2bm[vv] = Array.from(curBindingsSet).sort()
         }
-        const curBindings = cvv2bm[mn]
+        const curBindings = cvv2bm[vv]
         if (!preBindings || preBindings.toString() !== curBindings.toString()) {
-          remove(mn)
+          remove(vv)
           const input = resolve(VENDOR)
           return vite.build(
             {
               mode,
               publicDir: false,
+              root: dirname(getRequireParent(versionedVendorToImportersMap[vv][0])),
               build: {
                 rollupOptions: {
                   input,
                   output: {
-                    entryFileNames: `${ASSETS}/${mn}.[hash].js`,
-                    chunkFileNames: `${ASSETS}/${mn}.[hash].js`,
-                    assetFileNames: `${ASSETS}/${mn}.[hash][extname]`,
+                    entryFileNames: `${ASSETS}/${vv}.[hash].js`,
+                    chunkFileNames: `${ASSETS}/${vv}.[hash].js`,
+                    assetFileNames: `${ASSETS}/${vv}.[hash][extname]`,
                     format: 'es',
                     manualChunks: {}
                   },
@@ -431,11 +439,12 @@ const build = async () => {
                       curBindings.forEach(
                         (binding) => (binding.includes('/') ? subs.push(binding) : names.push(binding))
                       )
+                      const vendor = getUnversionedVendor(vv)
                       return (
                         (names.length
                           ? names.includes('*')
-                            ? `export * from "${mn}";`
-                            : `export { ${names.toString()} } from "${mn}";`
+                            ? `export * from "${vendor}";`
+                            : `export { ${names.toString()} } from "${vendor}";`
                           : '') +
                         subs
                           .map(
@@ -443,10 +452,11 @@ const build = async () => {
                               const index = sub.lastIndexOf('/')
                               const path = sub.slice(0, index)
                               const binding = sub.slice(index + 1)
+                              const name = sub.replace(/\W/g, SEP)
                               return binding
                                 ? binding === '*'
-                                  ? `export * as ${sub.replace(/\W/g, SEP)} from "${path}";`
-                                  : `export { ${binding} as ` + `${sub.replace(/\W/g, SEP)} } from "${path}";`
+                                  ? `export * as ${name} from "${path}";`
+                                  : `export { ${binding} as ` + `${name} } from "${path}";`
                                 : `import "${path}";`
                             }
                           )
@@ -455,7 +465,7 @@ const build = async () => {
                     }
                   }
                 },
-                plugins.meta(mn)
+                plugins.meta(vv)
               ]
             }
           )
@@ -619,7 +629,7 @@ const build = async () => {
           return Promise.all(
             Object.keys(meta.modules)
               .filter((mn) => meta.modules[mn].sources?.includes(path))
-              .map((lmn) => builder.lib(lmn))
+              .map(builder.lib)
           )
         }
       }
@@ -637,11 +647,12 @@ const build = async () => {
 
   await Promise.all(
     Object.keys(cvv2bm)
-      .filter((vendor) => !versionedVendorToDepInfoMap[vendor].dependencies.length)
-      .map((vendor) => builder.vendor(vendor))
+      .filter((vv) => !versionedVendorToDepInfoMap[vv].dependencies.length)
+      .map((vv) => builder.vendor(vv))
   )
 
-  await Promise.all([writeFile(resolve(DIST, `meta.json`), JSON.stringify(meta)), builder.entry()])
+  await builder.entry()
+  await writeFile(resolve(DIST, `meta.json`), JSON.stringify(meta))
 }
 
 export { building, build }

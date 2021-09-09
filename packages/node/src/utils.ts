@@ -31,6 +31,7 @@ export interface MFConfig {
   scope: string
   /**
    * Specified sources which participate the build. The build will respect their changes.
+   * @default All files in workspaces.
    */
   glob: Parameters<typeof fg>
   /**
@@ -59,10 +60,11 @@ const SRC = 'src'
 
 const config: MFConfig = await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default)
 
+const require = createRequire(resolve(PACKAGE_JSON))
+
 config.scope[0] !== '@' && (config.scope = '@' + config.scope)
 config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
-
-const require = createRequire(resolve(PACKAGE_JSON))
+config.glob = config.glob || [require(resolve(PACKAGE_JSON)).workspaces.map((pattern: string) => pattern + '/**')]
 
 const localModuleNameRegExp = new RegExp(`^${config.scope}/`)
 const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
@@ -304,6 +306,7 @@ export {
   getAppPkgName,
   getApps,
   getSrcPathes,
+  getPkgPathes,
   getNormalizedPath,
   getRoutesMoudleNameToPagesMap,
   getRoutesOption,
