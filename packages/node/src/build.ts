@@ -171,6 +171,8 @@ const build = async () => {
     return require(path)
   }
 
+  const vendorToVersionedVendorMap: Record<string, string> = {}
+  const importerToVendorToVersionedVendorMapMap: Record<string, typeof vendorToVersionedVendorMap> = {}
   const versionedVendorToImportersMap: Record<string, string[]> = {}
   const versionedVendorToPkgInfoMap: Record<string, PackageJson> = {}
   const traverseVendorDeps = (vendor: string, importer: string) => {
@@ -184,6 +186,37 @@ const build = async () => {
     hasTraversed ||
       Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach((vendor) => traverseVendorDeps(vendor, vv))
   }
+
+  const getPkgJsonPath = cached(
+    (importer) =>
+      isLocalModule(importer)
+        ? require.resolve(`${importer}/${PACKAGE_JSON}`)
+        : versionedVendorToPkgJsonPathMap[importer]
+  )
+  const traverseDeps = cached(
+    (importer) => {
+      const pp = getPkgJsonPath(importer)
+      const { dependencies = {}, peerDependencies = {} } = require(pp)
+      const importers = (versionedVendorToImportersMap[importer] = versionedVendorToImportersMap[importer] || [])
+      importers.push(importer)
+      Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
+        (vendor) => {
+          let path = mc.rvpjp && mc.rvpjp(vendor, importer, pp, utils)
+          if (!path) {
+            const require = createRequire(pp)
+            try {
+              path = require.resolve(`${vendor}/${PACKAGE_JSON}`)
+            } catch (error) {
+              path = vite.normalizePath(require.resolve(vendor)).replace(new RegExp(`(?<=/${vendor}/).+`), PACKAGE_JSON)
+            }
+          }
+          const pi = require(path)
+          versionedVendorToPkgInfoMap[importer] = pi
+          versionedVendorToPkgJsonPathMap[getVersionedVendor(vendor, pi.version)] = path
+        }
+      )
+    }
+  )
 
   const versionedVendorToDepInfoMap: Record<string, DepInfo> = {}
 
