@@ -122,7 +122,7 @@ const getSrcPathes = once(
 const getPkgPathes = once(
   () =>
     fg
-      .sync('node_modules/' + config.scope, { onlyDirectories: true, markDirectories: true })
+      .sync('node_modules/' + config.scope + '/*', { onlyDirectories: true, markDirectories: true })
       .map((path) => getNormalizedPath(readlinkSync(path)))
 )
 
