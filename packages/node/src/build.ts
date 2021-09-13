@@ -331,7 +331,7 @@ const build = async () => {
                       if (vendorToVersionedVendorsMap[vendor].length > 1) {
                         content = content.replace(
                           new RegExp(`(["'])${vendor}\\1`),
-                          importerToVendorToVersionedVendorMapMap[getVendor(mn)][vendor]
+                          `"${importerToVendorToVersionedVendorMapMap[getVendor(mn)][vendor]}"`
                         )
                       }
                       ms.overwrite(ss, se, content)
