@@ -21,7 +21,6 @@ import {
   getSrcPathes,
   getPkgPathes,
   getNormalizedPath,
-  getPkgName,
   getVendor,
   getLocalModuleName,
   getLocalModulePath,
@@ -148,44 +147,10 @@ const build = async () => {
 
   const getModuleInfo = cached((mn) => (meta.modules[mn] = meta.modules[mn] || {}))
 
-  const versionedVendorToPkgJsonPathMap: Record<string, string> = {}
-  const getRequireParent = cached(
-    (importer) =>
-      isLocalModule(importer)
-        ? require.resolve(`${getPkgName(importer)}/${PACKAGE_JSON}`)
-        : versionedVendorToPkgJsonPathMap[importer]
-  )
-
-  const getVendorPkgInfo = (vendor: string, importer: string): PackageJson => {
-    let parent = getRequireParent(importer)
-    let path = mc.rvpjp && mc.rvpjp(vendor, importer, parent, utils)
-    if (!path) {
-      const require = createRequire(parent)
-      try {
-        path = require.resolve(`${vendor}/${PACKAGE_JSON}`)
-      } catch (error) {
-        path = vite.normalizePath(require.resolve(vendor)).replace(new RegExp(`(?<=/${vendor}/).+`), PACKAGE_JSON)
-      }
-    }
-    versionedVendorToPkgJsonPathMap[getVersionedVendor(vendor, require(path).version)] = path
-    return require(path)
-  }
-
-  const vendorToVersionedVendorMap: Record<string, string> = {}
-  const importerToVendorToVersionedVendorMapMap: Record<string, typeof vendorToVersionedVendorMap> = {}
-  const versionedVendorToImportersMap: Record<string, string[]> = {}
   const versionedVendorToPkgInfoMap: Record<string, PackageJson> = {}
-  const traverseVendorDeps = (vendor: string, importer: string) => {
-    const pi = getVendorPkgInfo(vendor, importer)
-    const { version, dependencies = {}, peerDependencies = {} } = pi
-    const vv = getVersionedVendor(vendor, version!)
-    const hasTraversed = !!versionedVendorToImportersMap[vv]
-    const importers = (versionedVendorToImportersMap[vv] = versionedVendorToImportersMap[vv] || [])
-    importers.push(importer)
-    versionedVendorToPkgInfoMap[vv] = pi
-    hasTraversed ||
-      Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach((vendor) => traverseVendorDeps(vendor, vv))
-  }
+  const versionedVendorToPkgJsonPathMap: Record<string, string> = {}
+  const versionedVendorToImportersMap: Record<string, string[]> = {}
+  const importerToVendorToVersionedVendorMapMap: Record<string, Record<string, string>> = {}
 
   const getPkgJsonPath = cached(
     (importer) =>
@@ -197,8 +162,8 @@ const build = async () => {
     (importer) => {
       const pp = getPkgJsonPath(importer)
       const { dependencies = {}, peerDependencies = {} } = require(pp)
-      const importers = (versionedVendorToImportersMap[importer] = versionedVendorToImportersMap[importer] || [])
-      importers.push(importer)
+      const vendorToVersionedVendorMap: Record<string, string> = (importerToVendorToVersionedVendorMapMap[importer] =
+        {})
       Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
         (vendor) => {
           let path = mc.rvpjp && mc.rvpjp(vendor, importer, pp, utils)
@@ -211,10 +176,16 @@ const build = async () => {
             }
           }
           const pi = require(path)
-          versionedVendorToPkgInfoMap[importer] = pi
-          versionedVendorToPkgJsonPathMap[getVersionedVendor(vendor, pi.version)] = path
+          const vv = getVersionedVendor(vendor, pi.version)
+          const importers = (versionedVendorToImportersMap[vv] = versionedVendorToImportersMap[vv] || [])
+          importers.push(importer)
+          vendorToVersionedVendorMap[vendor] = vv
+          versionedVendorToPkgInfoMap[vv] = pi
+          versionedVendorToPkgJsonPathMap[vv] = path
+          traverseDeps(vv)
         }
       )
+      return true
     }
   )
 
@@ -281,16 +252,7 @@ const build = async () => {
     return versionedVendorToBindingsMap
   }
 
-  getPkgPathes().forEach(
-    (pp) => {
-      const pjp = resolve(pp, PACKAGE_JSON)
-      const pi = require(pjp)
-      const { dependencies = {}, peerDependencies = {} } = pi
-      Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
-        (vendor) => traverseVendorDeps(vendor, require(pjp).name)
-      )
-    }
-  )
+  getPkgPathes().forEach((pp) => traverseDeps(require(resolve(pp, PACKAGE_JSON)).name))
 
   const vendorToVersionedVendorsMap: Record<string, string[]> = {}
   Object.keys(versionedVendorToImportersMap).forEach(
@@ -327,8 +289,8 @@ const build = async () => {
             pending.forEach(
               ([imported, vendor]) => {
                 imports.forEach(
-                  ({ n: mn, ss, se }) => {
-                    if (mn === imported) {
+                  ({ n, ss, se }) => {
+                    if (n === imported) {
                       const bindings = importedBindings[imported]
                       let content = code.slice(ss, se).replace(/\n/g, ' ')
                       if (imported.length > vendor.length) {
@@ -369,7 +331,7 @@ const build = async () => {
                       if (vendorToVersionedVendorsMap[vendor].length > 1) {
                         content = content.replace(
                           new RegExp(`(["'])${vendor}\\1`),
-                          getVersionedVendor(vendor, getVendorPkgInfo(vendor, mn).version!)
+                          importerToVendorToVersionedVendorMapMap[getVendor(mn)][vendor]
                         )
                       }
                       ms.overwrite(ss, se, content)
@@ -399,7 +361,7 @@ const build = async () => {
               if (isVendorModule(imported)) {
                 const rbs = importedBindings[imported]
                 const vendor = getVendor(imported)
-                const vv = getVersionedVendor(vendor, getVendorPkgInfo(vendor, mn).version!)
+                const vv = importerToVendorToVersionedVendorMapMap[getVendor(mn)][vendor]
                 const bindings = (info.imports[vv] = info.imports[vv] || [])
                 const prefix = imported.length > vendor.length || !rbs.length ? imported + '/' : ''
                 rbs.length ? rbs.forEach((rb) => bindings.push(prefix + rb)) : bindings.push(prefix)
@@ -441,7 +403,7 @@ const build = async () => {
             {
               mode,
               publicDir: false,
-              root: dirname(getRequireParent(versionedVendorToImportersMap[vv][0])),
+              root: dirname(getPkgJsonPath(versionedVendorToImportersMap[vv][0])),
               build: {
                 rollupOptions: {
                   input,

@@ -1,3 +1,4 @@
+import { readlinkSync } from 'fs'
 import { pathToFileURL } from 'url'
 import { resolve } from 'path'
 import { createRequire } from 'module'
@@ -57,17 +58,6 @@ export interface MFConfig {
 const ROUTES_PACKAGE_NAME = '@mf/routes'
 const PACKAGE_JSON = 'package.json'
 const SRC = 'src'
-
-const config: MFConfig = await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default)
-
-const require = createRequire(resolve(PACKAGE_JSON))
-
-config.scope[0] !== '@' && (config.scope = '@' + config.scope)
-config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
-config.glob = config.glob || [require(resolve(PACKAGE_JSON)).workspaces.map((pattern: string) => pattern + '/**')]
-
-const localModuleNameRegExp = new RegExp(`^${config.scope}/`)
-const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
 
 const once = <T extends (...args: any) => any>(fn: T): T => {
   let res: ReturnType<T>
@@ -131,10 +121,9 @@ const getSrcPathes = once(
 
 const getPkgPathes = once(
   () =>
-    fg.sync(
-      require(resolve(PACKAGE_JSON)).workspaces,
-      { ignore: ['**/node_modules/**'], onlyDirectories: true, markDirectories: true }
-    )
+    fg
+      .sync('node_modules/' + config.scope, { onlyDirectories: true, markDirectories: true })
+      .map((path) => getNormalizedPath(readlinkSync(path)))
 )
 
 const getNormalizedPath = cached((ap) => normalizePath(ap).replace(normalizePath(cwd()), '').slice(1))
@@ -291,6 +280,17 @@ const stringify = (payload: any, replacer?: (key: string | number, value: any) =
       return JSON.stringify(payload)
   }
 }
+
+const config: MFConfig = await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default)
+
+const require = createRequire(resolve(PACKAGE_JSON))
+
+config.scope[0] !== '@' && (config.scope = '@' + config.scope)
+config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
+config.glob = config.glob || [getPkgPathes().map((pattern: string) => pattern + '**')]
+
+const localModuleNameRegExp = new RegExp(`^${config.scope}/`)
+const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
 
 export {
   PACKAGE_JSON,
