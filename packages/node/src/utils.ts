@@ -126,7 +126,7 @@ const getPkgPathes = once(
       .map((path) => getNormalizedPath(readlinkSync(path)))
 )
 
-const getNormalizedPath = cached((ap) => normalizePath(ap).replace(normalizePath(cwd()), '').slice(1))
+const getNormalizedPath = cached((ap) => normalizePath(ap).slice(normalizePath(cwd()).length + 1))
 
 const getRoutesMoudleNameToPagesMap = once(
   () => {
