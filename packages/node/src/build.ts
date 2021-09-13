@@ -496,7 +496,10 @@ const build = async () => {
             {
               name: 'mf-lib',
               async resolveId (source, importer, options) {
-                if (!source.startsWith('.') && !source.startsWith('\0') && !isAbsolute(source)) {
+                if (source.startsWith('\0')) {
+                  return null
+                }
+                if (!source.startsWith('.') && !isAbsolute(source)) {
                   throw new Error(
                     `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
                       `but it isn't declared in the dependencies field of the ` +
