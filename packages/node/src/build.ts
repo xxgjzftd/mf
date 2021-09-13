@@ -204,7 +204,7 @@ const build = async () => {
                   const vv = imported
                   const bindings = (versionedVendorToBindingsSetMap[vv] =
                     versionedVendorToBindingsSetMap[vv] || new Set())
-                  imports[vv].forEach(bindings.add)
+                  imports[vv].forEach((binding) => bindings.add(binding))
                 }
               }
             )
