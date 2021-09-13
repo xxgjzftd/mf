@@ -73,7 +73,7 @@ const cached = <T extends (string: string) => any>(fn: T) => {
 
 const isPkg = cached((lmn) => getPkgName(lmn) === lmn)
 const isPage = cached((path) => !!getRoutesMoudleNames(path).length)
-const isAsset = cached((path) => !config.extensions.includes(path.slice(path.lastIndexOf('.'))))
+const isAsset = cached((path) => !config.extensions.includes(path.slice(path.lastIndexOf('.') + 1)))
 const isLocalModule = cached((mn) => localModuleNameRegExp.test(mn))
 const isRoutesModule = cached((mn) => mn.startsWith(ROUTES_PACKAGE_NAME))
 const isVendorModule = cached((mn) => !isLocalModule(mn) && !isRoutesModule(mn))
