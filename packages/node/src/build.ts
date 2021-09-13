@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, resolve } from 'path'
+import { isAbsolute, resolve } from 'path'
 import { writeFile, rm } from 'fs/promises'
 import { argv, exit, stdout } from 'process'
 import { createRequire } from 'module'
@@ -398,12 +398,12 @@ const build = async () => {
         const curBindings = cvv2bm[vv]
         if (!preBindings || preBindings.toString() !== curBindings.toString()) {
           remove(vv)
+          const vendor = getUnversionedVendor(vv)
           const input = resolve(VENDOR)
           return vite.build(
             {
               mode,
               publicDir: false,
-              root: dirname(getPkgJsonPath(versionedVendorToImportersMap[vv][0])),
               build: {
                 rollupOptions: {
                   input,
@@ -425,6 +425,8 @@ const build = async () => {
                   resolveId (source) {
                     if (source === input) {
                       return VENDOR
+                    } else if (source === vendor) {
+                      return this.resolve(source, getPkgJsonPath(versionedVendorToImportersMap[vv][0]))
                     }
                   },
                   load (id) {
@@ -434,7 +436,6 @@ const build = async () => {
                       curBindings.forEach(
                         (binding) => (binding.includes('/') ? subs.push(binding) : names.push(binding))
                       )
-                      const vendor = getUnversionedVendor(vv)
                       return (
                         (names.length
                           ? names.includes('*')
