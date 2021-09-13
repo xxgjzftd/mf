@@ -41,7 +41,7 @@ const routes = (): Plugin => {
         const pnToPagesMap: Record<string, string[]> = {}
         pages.forEach(
           (path) => {
-            const pn = getPkgName(getLocalModuleName(path))
+            const pn = getPkgName(getLocalModuleName(path)!)
             pnToPagesMap[pn] = pnToPagesMap[pn] || []
             pnToPagesMap[pn].push(path)
           }
