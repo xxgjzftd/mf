@@ -422,11 +422,15 @@ const build = async () => {
                 {
                   name: 'mf-vendor',
                   enforce: 'pre',
-                  resolveId (source) {
+                  resolveId (source, _, options) {
                     if (source === input) {
                       return VENDOR
                     } else if (source === vendor) {
-                      return this.resolve(source, getPkgJsonPath(versionedVendorToImportersMap[vv][0]))
+                      return this.resolve(
+                        source,
+                        getPkgJsonPath(versionedVendorToImportersMap[vv][0]),
+                        Object.assign({ skipSelf: true }, options)
+                      )
                     }
                   },
                   load (id) {
