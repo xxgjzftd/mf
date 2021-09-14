@@ -107,7 +107,7 @@ interface UserDefinedApp {
 interface BaseApp {
   name: string
   predicate: () => boolean
-  load(): Promise<UserDefinedApp>
+  load(): Promise<{ default: UserDefinedApp }>
   status: MFAppStatus
 }
 
@@ -161,7 +161,7 @@ const route = async function () {
     toBeMounted.map(
       async (app) => {
         if (app.status === MFAppStatus.NOT_LOADED) {
-          Object.assign(app, await app.load())
+          Object.assign(app, await app.load().then((m) => m.default))
           app.status = MFAppStatus.NOT_MOUNTED
         }
         await app.mount!()

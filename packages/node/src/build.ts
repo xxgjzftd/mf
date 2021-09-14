@@ -122,6 +122,7 @@ const build = async () => {
   !sources.length && exit()
   await execa('yarn').stdout?.pipe(stdout)
   meta.hash = execa.sync('git', ['rev-parse', '--short', 'HEAD']).stdout
+  meta.version = require('@mf/node/package.json').version
 
   const remove = (mn: string) => {
     const info = meta.modules[mn]
@@ -401,8 +402,9 @@ const build = async () => {
           cvv2bm[vv] = Array.from(curBindingsSet).sort()
         }
         const curBindings = cvv2bm[vv]
-        if (!preBindings || preBindings.toString() !== curBindings.toString()) {
+        if (preBindings?.toString() !== curBindings.toString()) {
           remove(vv)
+          if (!curBindings.length) return
           const vendor = getUnversionedVendor(vv)
           const input = resolve(VENDOR)
           return vite.build(
