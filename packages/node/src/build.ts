@@ -43,7 +43,7 @@ interface MetaModuleInfo {
   js: string
   css?: string
   sources?: string[]
-  imports: OutputChunk['importedBindings']
+  imports: Record<string, string[]>
 }
 
 interface MetaModules {
@@ -217,21 +217,24 @@ const build = async () => {
       Object.keys(versionedVendorToImportersMap).forEach(
         (vv) => versionedVendorToImportersMap[vv].length > 1 && vvs.add(vv)
       )
-      vvs.forEach(
-        (vv) => {
-          const di = (versionedVendorToDepInfoMap[vv] = versionedVendorToDepInfoMap[vv] || {
+      const getDepsInfo = cached(
+        (vv) =>
+          (versionedVendorToDepInfoMap[vv] = versionedVendorToDepInfoMap[vv] || {
             dependencies: [],
             dependents: []
           })
+      )
+      vvs.forEach(
+        (vv) => {
+          const di = getDepsInfo(vv)
           const { peerDependencies = {}, dependencies = {} } = versionedVendorToPkgInfoMap[vv]
-          di.dependencies = []
           Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
-            (dep) => vvs.has(dep) && di.dependencies.push(dep)
+            (vendor) => vvs.has(importerToVendorToVersionedVendorMapMap[vv][vendor]) && di.dependencies.push(vendor)
           )
           di.dependencies.forEach(
-            (ivv) => {
-              const idi = (versionedVendorToDepInfoMap[ivv] = versionedVendorToDepInfoMap[ivv] || {})
-              idi.dependents = idi.dependents || []
+            (vendor) => {
+              const ivv = importerToVendorToVersionedVendorMapMap[vv][vendor]
+              const idi = getDepsInfo(ivv)
               idi.dependents.push(vv)
             }
           )
@@ -392,7 +395,9 @@ const build = async () => {
         if (info.dependents) {
           await Promise.all(info.dependents.map(builder.vendor))
           const curBindingsSet = new Set(cvv2bm[vv])
-          info.dependents.forEach((ivv) => meta.modules[ivv].imports[vv]?.forEach(curBindingsSet.add))
+          info.dependents.forEach(
+            (ivv) => meta.modules[ivv]?.imports[vv]?.forEach((binding) => curBindingsSet.add(binding))
+          )
           cvv2bm[vv] = Array.from(curBindingsSet).sort()
         }
         const curBindings = cvv2bm[vv]
@@ -422,16 +427,17 @@ const build = async () => {
                 {
                   name: 'mf-vendor',
                   enforce: 'pre',
-                  resolveId (source, _, options) {
+                  resolveId (source, importer, options) {
                     if (source === input) {
                       return VENDOR
-                    } else if (source === vendor) {
+                    } else if (importer === VENDOR) {
                       return this.resolve(
                         source,
                         getPkgJsonPath(versionedVendorToImportersMap[vv][0]),
                         Object.assign({ skipSelf: true }, options)
                       )
                     }
+                    return null
                   },
                   load (id) {
                     if (id === VENDOR) {
@@ -584,8 +590,32 @@ const build = async () => {
               name: 'mf-inject-meta',
               transformIndexHtml (html) {
                 let importmap: { imports: Record<string, string> } = { imports: {} }
+                const getKey = cached(
+                  (mn) =>
+                    isVendorModule(mn) && vendorToVersionedVendorsMap[getUnversionedVendor(mn)].length === 1
+                      ? getUnversionedVendor(mn)
+                      : mn
+                )
                 const imports = importmap.imports
-                Object.keys(meta.modules).forEach((mn) => (imports[mn] = BASE + meta.modules[mn].js))
+                interface MFModulesInfo {
+                  js: string
+                  css?: string
+                  imports: string[]
+                }
+                const mm: Record<string, MFModulesInfo> = {}
+                Object.keys(meta.modules).forEach(
+                  (mn) => {
+                    const key = getKey(mn)
+                    imports[key] = BASE + meta.modules[mn].js
+                    const mfi: MFModulesInfo = (mm[key] = {
+                      js: meta.modules[mn].js,
+                      imports: []
+                    })
+                    meta.modules[mn].css && (mfi.css = meta.modules[mn].css)
+                    Object.keys(meta.modules[mn].imports).forEach((imported) => mfi.imports.push(getKey(imported)))
+                  }
+                )
+
                 return {
                   html: html.replace(/\<script(.+)type=['"]module['"]/g, '<script$1type="module-shim"'),
                   tags: [
@@ -601,7 +631,7 @@ const build = async () => {
                       children:
                         `window.mf = window.mf || {};` +
                         `window.mf.base = '${BASE}';` +
-                        `window.mf.modules = ${JSON.stringify(meta.modules)}`
+                        `window.mf.modules = ${JSON.stringify(mm)}`
                     }
                   ]
                 }
@@ -651,7 +681,11 @@ const build = async () => {
   await Promise.all(
     Object.keys(cvv2bm)
       .filter((vv) => !versionedVendorToDepInfoMap[vv].dependencies.length)
-      .map((vv) => builder.vendor(vv))
+      .map(builder.vendor)
+  ).catch(
+    (reason) => {
+      console.log(reason)
+    }
   )
 
   await builder.entry()

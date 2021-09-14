@@ -1,12 +1,12 @@
-interface ModuleInfo {
+interface MFModulesInfo {
   js: string
   css?: string
-  imports: Record<string, string[]>
+  imports: string[]
 }
 
 interface MF {
   base: string
-  modules: Record<string, ModuleInfo>
+  modules: Record<string, MFModulesInfo>
   load(mn: string): Promise<any>
   unload(mn: string): void
   register(name: string, predicate: () => boolean, load: () => Promise<any>): void
@@ -27,26 +27,17 @@ const cached = <T extends (string: string) => any>(fn: T) => {
   return ((string) => cache[string] || (cache[string] = fn(string))) as T
 }
 
-const getModuleName = cached(
-  (mn) => {
-    const index = mn.indexOf('/', mn[0] === '@' ? mn.indexOf('/') + 1 : 0)
-    return ~index ? mn.slice(0, index) : mn
-  }
-)
-
 const getDeps = cached(
   (mn) => {
     let deps: string[] = []
-    const info = window.mf.modules[mn] || window.mf.modules[getModuleName(mn)]
+    const info = window.mf.modules[mn]
     deps.push(info.js)
     info.css && deps.push(info.css)
-    if (info.imports) {
-      Object.keys(info.imports).forEach(
-        (mn) => {
-          deps = deps.concat(getDeps(mn))
-        }
-      )
-    }
+    info.imports.forEach(
+      (mn) => {
+        deps = deps.concat(getDeps(mn))
+      }
+    )
     return deps
   }
 )
