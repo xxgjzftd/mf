@@ -6,6 +6,7 @@
       "@*": ["src/*"]
     },
     "lib": ["esnext"],
+    "types": ["./global"],
     "isolatedModules": true
   }
 }

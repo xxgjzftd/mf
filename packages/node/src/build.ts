@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from 'path'
 import { writeFile, rm } from 'fs/promises'
-import { argv, exit, stdout } from 'process'
+import { exit, stdout } from 'process'
 import { createRequire } from 'module'
 
 import vite from 'vite'
@@ -64,19 +64,11 @@ interface DepInfo {
   dependents: string[]
 }
 
-process.on(
-  'uncaughtException',
-  (error) => {
-    console.log(error)
-  }
-)
-
 let building = false
 
-const build = async () => {
+const build = async (mode?: string) => {
   building = true
   let meta: Meta
-  const mode = argv[2]
 
   const config = await vite.resolveConfig({ mode }, 'build')
 
@@ -101,7 +93,7 @@ const build = async () => {
   meta.modules = meta.modules || {}
 
   let sources: Source[] = []
-  if (meta.hash && meta.version === require('@mf/node/package.json').version) {
+  if (meta.hash && meta.version === VERSION) {
     const { stdout } = execa.sync('git', ['diff', meta.hash, 'HEAD', '--name-status'])
     sources = stdout
       .split('\n')
@@ -122,7 +114,7 @@ const build = async () => {
   !sources.length && exit()
   await execa('yarn').stdout?.pipe(stdout)
   meta.hash = execa.sync('git', ['rev-parse', '--short', 'HEAD']).stdout
-  meta.version = require('@mf/node/package.json').version
+  meta.version = VERSION
 
   const remove = (mn: string) => {
     const info = meta.modules[mn]

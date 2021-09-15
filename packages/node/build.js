@@ -8,7 +8,9 @@ const pi = require('./package.json')
 esbuild.build(
   {
     bundle: true,
-    entryPoints: ['src/index.ts'],
+    splitting: true,
+    define: { VERSION: JSON.stringify(pi.version) },
+    entryPoints: ['src/index.ts', 'src/cli.ts'],
     external: Object.keys(pi.dependencies),
     format: 'esm',
     outdir: 'dist',
