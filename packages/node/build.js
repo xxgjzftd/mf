@@ -1,9 +1,14 @@
 import { createRequire } from 'module'
 
 import esbuild from 'esbuild'
+import { rm } from 'fs/promises'
 
 const require = createRequire(import.meta.url)
 const pi = require('./package.json')
+
+const outdir = 'dist'
+
+await rm(outdir, { recursive: true, force: true })
 
 esbuild.build(
   {
@@ -13,7 +18,7 @@ esbuild.build(
     entryPoints: ['src/index.ts', 'src/cli.ts'],
     external: Object.keys(pi.dependencies),
     format: 'esm',
-    outdir: 'dist',
+    outdir,
     platform: 'node',
     target: 'node14.17.0',
     write: true,

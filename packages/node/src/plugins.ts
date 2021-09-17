@@ -7,7 +7,8 @@ import {
   getPkgId,
   getApps,
   getAppPkgName,
-  getPkgName
+  getPkgName,
+  getLocalModulePath
 } from '@utils.js'
 import { building } from '@build'
 
@@ -105,7 +106,11 @@ const routes = (): Plugin => {
           rrs,
           (key, value) => {
             if (key === 'component') {
-              return '() => ' + (building ? `mf.load` : `import`) + `("${getLocalModuleName(value)}")`
+              return (
+                '() => ' +
+                (building ? `mf.load` : `import`) +
+                `("${building ? getLocalModuleName(value) : '/' + value}")`
+              )
             }
           }
         )
@@ -124,7 +129,8 @@ const entry = (): Plugin => {
         {
           tag: 'script',
           attrs: {
-            type: 'module-shim'
+            type: building ? 'module-shim' : 'module',
+            noshim: building ? false : true
           },
           children:
             getApps()
@@ -132,7 +138,8 @@ const entry = (): Plugin => {
                 (app) =>
                   `mf.register(` +
                   `"${getAppPkgName(app.name)}", ${stringify(app.predicate)}, ` +
-                  `() => ${building ? 'mf.load' : 'import'}("${getAppPkgName(app.name)}"));`
+                  `() => ${building ? 'mf.load' : 'import'}` +
+                  `("${building ? getAppPkgName(app.name) : '/' + getLocalModulePath(getAppPkgName(app.name))}"));`
               )
               .join('') + `mf.start()`,
           injectTo: 'head'

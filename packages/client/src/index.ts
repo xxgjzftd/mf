@@ -9,7 +9,7 @@ interface MF {
   modules: Record<string, MFModulesInfo>
   load(mn: string): Promise<any>
   unload(mn: string): void
-  register(name: string, predicate: () => boolean, load: () => Promise<any>): void
+  register(name: string, predicate: (pathname: string) => boolean, load: () => Promise<any>): void
   start(): Promise<any>
 }
 
@@ -106,7 +106,7 @@ interface UserDefinedApp {
 
 interface BaseApp {
   name: string
-  predicate: () => boolean
+  predicate: (pathname: string) => boolean
   load(): Promise<{ default: UserDefinedApp }>
   status: MFAppStatus
 }
@@ -132,7 +132,7 @@ const getApps = () => {
 
   apps.forEach(
     (app) => {
-      const shouldBeActive = app.predicate()
+      const shouldBeActive = app.predicate(location.pathname)
       switch (app.status) {
         case MFAppStatus.NOT_LOADED:
         case MFAppStatus.NOT_MOUNTED:

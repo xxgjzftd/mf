@@ -23,9 +23,27 @@ interface RoutesOption {
   extends: RouteExtend[]
 }
 
+interface BuildEnv {
+  command: string
+  mode?: string
+}
+
 interface AppConfig {
   name: string
-  predicate: () => boolean
+  predicate?: (pathname: string) => boolean
+  /**
+   * App specific vite config.
+   */
+  vite?: ((env: BuildEnv, utils: typeof import('./utils')) => UserConfig) | UserConfig
+  /**
+   * Determines which packages belong to this app.
+   * The filtered packages will be built with the app specific config.
+   * `mf` could't resolve deps of the app automatically unless we build the whole app.
+   * But it's not consistent with the goal of our incremental build.
+   * @param packages A package name array.
+   * @param utils A util set that `mf` use it internally.
+   */
+  packages?: ((packages: string[], utils: typeof import('./utils')) => string[]) | string[]
 }
 
 export interface MFConfig {
@@ -42,7 +60,6 @@ export interface MFConfig {
   extensions: string[]
   apps: AppConfig[]
   routes?: Record<string, RoutesOption>
-  vite?(lmn: string, utils: typeof import('./utils')): UserConfig
   /**
    * Abbreviation for resolve vendor package.json path.
    * A escape hatch for vendor which package.json path couldn't resolved by mf.
@@ -125,6 +142,8 @@ const getPkgPathes = once(
       .map((path) => getNormalizedPath(readlinkSync(path)))
 )
 
+const getPkgNames = once(() => getPkgPathes().map((pp) => require(resolve(pp, PACKAGE_JSON)).name))
+
 const getNormalizedPath = cached((ap) => normalizePath(ap).slice(normalizePath(cwd()).length + 1))
 
 const getRoutesMoudleNameToPagesMap = once(
@@ -151,7 +170,7 @@ const getRoutesMoudleNames = cached(
   }
 )
 
-const getPkgPath = cached(
+const getPkgPathFromPath = cached(
   (path) => {
     const pp = getPkgPathes().find((pp) => path.startsWith(pp))
     if (!pp) {
@@ -166,13 +185,13 @@ const getPkgPath = cached(
   }
 )
 
-const getPkgPathFromLmn = cached(
-  (lmn) => getNormalizedPath(require.resolve(`${getPkgName(lmn)}/${PACKAGE_JSON}`)).slice(0, -(PACKAGE_JSON.length + 1))
-)
+const getPkgJsonPath = cached((lmn) => getNormalizedPath(require.resolve(`${getPkgName(lmn)}/${PACKAGE_JSON}`)))
 
-const getPkgInfo = cached((path): PackageJson => require(resolve(getPkgPath(path), PACKAGE_JSON)))
+const getPkgPathFromLmn = cached((lmn) => getPkgJsonPath(lmn).slice(0, -(PACKAGE_JSON.length + 1)))
 
-const getPkgInfoFromLmn = cached((lmn): PackageJson => require(resolve(getPkgPathFromLmn(lmn), PACKAGE_JSON)))
+const getPkgInfoFromPath = cached((path): PackageJson => require(resolve(getPkgPathFromPath(path), PACKAGE_JSON)))
+
+const getPkgInfoFromLmn = cached((lmn): PackageJson => require(`${getPkgName(lmn)}/${PACKAGE_JSON}`))
 
 const getPkgName = cached((lmn) => lmn.split('/', 2).join('/'))
 
@@ -184,8 +203,8 @@ const getUnversionedVendor = cached((vv) => vv.slice(0, vv.lastIndexOf('@')))
 
 const getLocalModuleName = cached(
   (path) => {
-    const pp = getPkgPath(path)
-    const pi = getPkgInfo(path)
+    const pp = getPkgPathFromPath(path)
+    const pi = getPkgInfoFromPath(path)
     const { main, name } = pi
     if (!name || !name.startsWith(config.scope)) {
       throw new Error(
@@ -206,7 +225,7 @@ const getLocalModuleName = cached(
 const getLocalModulePath = cached(
   (lmn) =>
     isPkg(lmn)
-      ? getNormalizedPath(resolve(getPkgPathFromLmn(lmn), require(`${getPkgName(lmn)}/${PACKAGE_JSON}`).main))
+      ? getNormalizedPath(resolve(getPkgPathFromLmn(lmn), getPkgInfoFromLmn(lmn).main!))
       : getPkgPathFromLmn(lmn) + lmn.slice(getPkgName(lmn).length)
 )
 
@@ -280,6 +299,18 @@ const require = createRequire(resolve(PACKAGE_JSON))
 config.scope[0] !== '@' && (config.scope = '@' + config.scope)
 config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
 config.glob = config.glob || [getPkgPathes().map((pattern: string) => pattern + '**')]
+const dac = {
+  predicate: () => true,
+  vite: () => ({}),
+  packages: getPkgNames()
+}
+config.apps.forEach(
+  async (app) => {
+    app.predicate = app.predicate || dac.predicate
+    app.vite = app.vite || dac.vite
+    app.packages = app.packages || dac.packages
+  }
+)
 
 const localModuleNameRegExp = new RegExp(`^${config.scope}/`)
 const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
@@ -299,13 +330,15 @@ export {
   getApps,
   getSrcPathes,
   getPkgPathes,
+  getPkgNames,
   getNormalizedPath,
   getRoutesMoudleNameToPagesMap,
   getRoutesOption,
   getRoutesMoudleNames,
-  getPkgPath,
+  getPkgJsonPath,
+  getPkgPathFromPath,
   getPkgPathFromLmn,
-  getPkgInfo,
+  getPkgInfoFromPath,
   getPkgName,
   getVendor,
   getVersionedVendor,

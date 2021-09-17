@@ -19,7 +19,8 @@ import {
   isVendorModule,
   isIndependentModule,
   getSrcPathes,
-  getPkgPathes,
+  getPkgName,
+  getPkgNames,
   getNormalizedPath,
   getVendor,
   getLocalModuleName,
@@ -28,7 +29,8 @@ import {
   getExternal,
   getVersionedVendor,
   getUnversionedVendor,
-  getPkgPath,
+  getPkgJsonPath,
+  getPkgPathFromPath,
   getPkgPathFromLmn,
   getRoutesMoudleNames
 } from '@utils'
@@ -80,6 +82,13 @@ const build = async (mode?: string) => {
   const VENDOR = 'vendor'
 
   const isLocal = BASE === '/'
+
+  mc.apps.forEach(
+    (app) => {
+      typeof app.vite === 'function' && (app.vite = app.vite({ command: 'build', mode }, utils))
+      app.packages = Array.isArray(app.packages) ? app.packages : app.packages!(getPkgNames(), utils)
+    }
+  )
   try {
     if (isLocal) {
       meta = require(resolve(DIST, `meta.json`))
@@ -145,7 +154,7 @@ const build = async (mode?: string) => {
   const versionedVendorToImportersMap: Record<string, string[]> = {}
   const importerToVendorToVersionedVendorMapMap: Record<string, Record<string, string>> = {}
 
-  const getPkgJsonPath = cached(
+  const getPkgJsonPathFromImporter = cached(
     (importer) =>
       isLocalModule(importer)
         ? require.resolve(`${importer}/${PACKAGE_JSON}`)
@@ -153,7 +162,7 @@ const build = async (mode?: string) => {
   )
   const traverseDeps = cached(
     (importer) => {
-      const pp = getPkgJsonPath(importer)
+      const pp = getPkgJsonPathFromImporter(importer)
       const { dependencies = {}, peerDependencies = {} } = require(pp)
       const vendorToVersionedVendorMap: Record<string, string> = (importerToVendorToVersionedVendorMapMap[importer] =
         {})
@@ -248,7 +257,7 @@ const build = async (mode?: string) => {
     return versionedVendorToBindingsMap
   }
 
-  getPkgPathes().forEach((pp) => traverseDeps(require(resolve(pp, PACKAGE_JSON)).name))
+  getPkgNames().forEach((pn) => traverseDeps(pn))
 
   const vendorToVersionedVendorsMap: Record<string, string[]> = {}
   Object.keys(versionedVendorToImportersMap).forEach(
@@ -427,7 +436,7 @@ const build = async (mode?: string) => {
                     } else if (importer === VENDOR) {
                       return this.resolve(
                         source,
-                        getPkgJsonPath(versionedVendorToImportersMap[vv][0]),
+                        getPkgJsonPathFromImporter(versionedVendorToImportersMap[vv][0]),
                         Object.assign({ skipSelf: true }, options)
                       )
                     }
@@ -507,13 +516,13 @@ const build = async (mode?: string) => {
                   throw new Error(
                     `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
                       `but it isn't declared in the dependencies field of the ` +
-                      resolve(getPkgPathFromLmn(lmn), PACKAGE_JSON)
+                      resolve(getPkgJsonPath(lmn))
                   )
                 }
                 const resolution = await this.resolve(source, importer, Object.assign({ skipSelf: true }, options))
                 if (resolution) {
                   const path = getNormalizedPath(resolution.id)
-                  if (getPkgPathFromLmn(lmn) !== getPkgPath(path)) {
+                  if (getPkgPathFromLmn(lmn) !== getPkgPathFromPath(path)) {
                     throw new Error(
                       `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
                         `importing source cross package is not allowed.`
@@ -536,7 +545,12 @@ const build = async (mode?: string) => {
             plugins.meta(lmn)
           ]
         }
-        const uc = mc.vite && mc.vite(lmn, utils)
+        const pn = getPkgName(lmn)
+        const app = mc.apps.find((app) => (app.packages as string[]).includes(pn))
+        if (!app) {
+          throw new Error(`'${pn}' doesn't have corresponding app.`)
+        }
+        const uc = app.vite
         return vite.build(uc ? vite.mergeConfig(dc, uc) : dc)
       }
     ),
