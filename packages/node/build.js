@@ -1,7 +1,7 @@
+import { rm } from 'fs/promises'
 import { createRequire } from 'module'
 
 import esbuild from 'esbuild'
-import { rm } from 'fs/promises'
 
 const require = createRequire(import.meta.url)
 const pi = require('./package.json')
