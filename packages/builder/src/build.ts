@@ -33,9 +33,9 @@ import {
   getPkgPathFromPath,
   getPkgPathFromLmn,
   getRoutesMoudleNames
-} from '@utils'
-import { entry, routes } from '@plugins'
-import * as utils from '@utils'
+} from 'src/utils'
+import { entry, routes } from 'src/plugins'
+import * as utils from 'src/utils'
 
 import type { OutputChunk } from 'rollup'
 import type { Plugin, UserConfig } from 'vite'

@@ -1,9 +1,9 @@
 import vite from 'vite'
 import { URL } from 'url'
 
-import { entry, routes } from './plugins.js'
-import { config, getRoutesMoudleNames, getNormalizedPath, getDevAlias } from './utils.js'
-import * as utils from '@utils'
+import { entry, routes } from 'src/plugins.js'
+import { config, getRoutesMoudleNames, getNormalizedPath, getDevAlias } from 'src/utils.js'
+import * as utils from 'src/utils'
 
 import type { AddressInfo } from 'net'
 

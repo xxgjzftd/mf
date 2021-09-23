@@ -9,8 +9,8 @@ import {
   getAppPkgName,
   getPkgName,
   getLocalModulePath
-} from '@utils.js'
-import { building } from '@build'
+} from 'src/utils'
+import { building } from 'src/build'
 
 import type { Plugin } from 'vite'
 
