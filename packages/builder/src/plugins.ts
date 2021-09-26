@@ -13,15 +13,7 @@ import {
 import { building } from 'src/build'
 
 import type { Plugin } from 'vite'
-
-interface BaseRoute {
-  id: string
-  path: string
-  name: string
-  depth: number
-  component: string
-  children?: BaseRoute[]
-}
+import type { BaseRoute } from 'src/utils'
 
 const routes = (): Plugin => {
   return {
@@ -107,9 +99,7 @@ const routes = (): Plugin => {
           (key, value) => {
             if (key === 'component') {
               return (
-                '() => ' +
-                (building ? `mf.load` : `import`) +
-                `("${building ? getLocalModuleName(value) : '/' + value}")`
+                '()=>' + (building ? `mf.load` : `import`) + `("${building ? getLocalModuleName(value) : '/' + value}")`
               )
             }
           }
@@ -137,11 +127,11 @@ const entry = (): Plugin => {
               .map(
                 (app) =>
                   `mf.register(` +
-                  `"${getAppPkgName(app.name)}", ${stringify(app.predicate)}, ` +
-                  `() => ${building ? 'mf.load' : 'import'}` +
+                  `"${getAppPkgName(app.name)}", ${stringify(app.predicate)},` +
+                  `()=>${building ? 'mf.load' : 'import'}` +
                   `("${building ? getAppPkgName(app.name) : '/' + getLocalModulePath(getAppPkgName(app.name))}"));`
               )
-              .join('') + `mf.start()`,
+              .join('') + `mf.start();`,
           injectTo: 'head'
         }
       ]

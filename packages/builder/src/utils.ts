@@ -10,13 +10,18 @@ import { normalizePath } from 'vite'
 import type { PackageJson } from 'type-fest'
 import type { UserConfig } from 'vite'
 
-interface RouteExtend {
+export interface BaseRoute {
   id: string
+  path: string
+  name: string
   depth: number
-  route: Record<string, any>
+  component: string
+  children?: BaseRoute[]
 }
 
-interface RoutesOption {
+type RouteExtend = Partial<Pick<BaseRoute, 'path' | 'name' | 'depth'>> & Pick<BaseRoute, 'id'>
+
+export interface RoutesOption {
   glob: Parameters<typeof fg>
   base?: string
   depth: number
@@ -52,7 +57,7 @@ export interface MFConfig {
    * Specified sources which participate the build. The build will respect their changes.
    * @default All files in workspaces.
    */
-  glob: Parameters<typeof fg>
+  glob?: Parameters<typeof fg>
   /**
    * Source which has extension specified in this config and its pkg doesn't have the `main` field
    * will be built as a independent module.
@@ -158,7 +163,7 @@ const getApps = once(
 
 const getSrcPathes = once(
   () => {
-    const [source, options = {}] = config.glob
+    const [source, options = {}] = config.glob!
     return fg.sync(source, getSanitizedFgOptions(options))
   }
 )
@@ -321,6 +326,7 @@ const stringify = (payload: any, replacer?: (key: string | number, value: any) =
 }
 
 export {
+  ROUTES_PACKAGE_NAME,
   PACKAGE_JSON,
   config,
   resolveConfig,
