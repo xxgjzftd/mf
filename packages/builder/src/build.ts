@@ -11,8 +11,8 @@ import { init, parse } from 'es-module-lexer'
 
 import {
   PACKAGE_JSON,
-  config as mc,
-  require,
+  resolveConfig,
+  rq,
   cached,
   isPage,
   isLocalModule,
@@ -73,6 +73,7 @@ const build = async (mode?: string) => {
   let meta: Meta
 
   const config = await vite.resolveConfig({ mode }, 'build')
+  const mc = await resolveConfig()
 
   const SEP = '$mf'
   const BASE = config.base
@@ -91,7 +92,7 @@ const build = async (mode?: string) => {
   )
   try {
     if (isLocal) {
-      meta = require(resolve(DIST, `meta.json`))
+      meta = rq(resolve(DIST, `meta.json`))
     } else {
       meta = await axios.get(`${BASE}meta.json`).then((res) => res.data)
     }
@@ -156,14 +157,12 @@ const build = async (mode?: string) => {
 
   const getPkgJsonPathFromImporter = cached(
     (importer) =>
-      isLocalModule(importer)
-        ? require.resolve(`${importer}/${PACKAGE_JSON}`)
-        : versionedVendorToPkgJsonPathMap[importer]
+      isLocalModule(importer) ? rq.resolve(`${importer}/${PACKAGE_JSON}`) : versionedVendorToPkgJsonPathMap[importer]
   )
   const traverseDeps = cached(
     (importer) => {
       const pp = getPkgJsonPathFromImporter(importer)
-      const { dependencies = {}, peerDependencies = {} } = require(pp)
+      const { dependencies = {}, peerDependencies = {} } = rq(pp)
       const vendorToVersionedVendorMap: Record<string, string> = (importerToVendorToVersionedVendorMapMap[importer] =
         {})
       Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
@@ -177,7 +176,7 @@ const build = async (mode?: string) => {
               path = vite.normalizePath(require.resolve(vendor)).replace(new RegExp(`(?<=/${vendor}/).+`), PACKAGE_JSON)
             }
           }
-          const pi = require(path)
+          const pi = rq(path)
           const vv = getVersionedVendor(vendor, pi.version)
           const importers = (versionedVendorToImportersMap[vv] = versionedVendorToImportersMap[vv] || [])
           importers.push(importer)

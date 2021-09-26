@@ -3,13 +3,14 @@ const { compilerOptions } = require('./tsconfig.json')
 
 /** @type {import('ts-jest/dist/types').InitialOptionsTsJest} */
 module.exports = {
-  preset: 'ts-jest/presets/default-esm',
+  automock: true,
+  preset: 'ts-jest',
   testEnvironment: 'node',
   moduleNameMapper: pathsToModuleNameMapper(compilerOptions.paths, { prefix: '<rootDir>/' }),
   globals: {
+    TEST: true,
     'ts-jest': {
-      tsconfig: 'tsconfig.json',
-      useESM: true
+      tsconfig: 'tsconfig.test.json'
     }
   }
 }

@@ -90,7 +90,7 @@ const cached = <T extends (string: string) => any>(fn: T) => {
 
 const isPkg = cached((lmn) => getPkgName(lmn) === lmn)
 const isPage = cached((path) => !!getRoutesMoudleNames(path).length)
-const isLocalModule = cached((mn) => localModuleNameRegExp.test(mn))
+const isLocalModule = cached((mn) => mn.startsWith(`${config.scope}/`))
 const isRoutesModule = cached((mn) => mn.startsWith(ROUTES_PACKAGE_NAME))
 const isVendorModule = cached((mn) => !isLocalModule(mn) && !isRoutesModule(mn))
 const isIndependentModule = cached((path) => getLocalModuleName(path) && !isPkg(getLocalModuleName(path)!))
@@ -118,7 +118,7 @@ const getApps = once(
     config.apps.forEach(
       (app) => {
         try {
-          require(`${getAppPkgName(app.name)}/${PACKAGE_JSON}`)
+          rq(`${getAppPkgName(app.name)}/${PACKAGE_JSON}`)
         } catch (error) {
           throw new Error(`'${getAppPkgName(app.name)}' doesn't exist in this project.`)
         }
@@ -142,7 +142,7 @@ const getPkgPathes = once(
       .map((path) => getNormalizedPath(readlinkSync(path)))
 )
 
-const getPkgNames = once(() => getPkgPathes().map((pp) => require(resolve(pp, PACKAGE_JSON)).name))
+const getPkgNames = once(() => getPkgPathes().map((pp) => rq(resolve(pp, PACKAGE_JSON)).name))
 
 const getNormalizedPath = cached((ap) => normalizePath(ap).slice(normalizePath(cwd()).length + 1))
 
@@ -185,13 +185,13 @@ const getPkgPathFromPath = cached(
   }
 )
 
-const getPkgJsonPath = cached((lmn) => getNormalizedPath(require.resolve(`${getPkgName(lmn)}/${PACKAGE_JSON}`)))
+const getPkgJsonPath = cached((lmn) => getNormalizedPath(rq.resolve(`${getPkgName(lmn)}/${PACKAGE_JSON}`)))
 
 const getPkgPathFromLmn = cached((lmn) => getPkgJsonPath(lmn).slice(0, -(PACKAGE_JSON.length + 1)))
 
-const getPkgInfoFromPath = cached((path): PackageJson => require(resolve(getPkgPathFromPath(path), PACKAGE_JSON)))
+const getPkgInfoFromPath = cached((path): PackageJson => rq(resolve(getPkgPathFromPath(path), PACKAGE_JSON)))
 
-const getPkgInfoFromLmn = cached((lmn): PackageJson => require(`${getPkgName(lmn)}/${PACKAGE_JSON}`))
+const getPkgInfoFromLmn = cached((lmn): PackageJson => rq(`${getPkgName(lmn)}/${PACKAGE_JSON}`))
 
 const getPkgName = cached((lmn) => lmn.split('/', 2).join('/'))
 
@@ -236,7 +236,7 @@ const getAliasKey = cached((lmn) => '@' + getPkgId(lmn))
 const getAlias = cached(
   (lmn) => {
     const pn = getPkgName(lmn)
-    const pjp = require.resolve(`${pn}/${PACKAGE_JSON}`)
+    const pjp = rq.resolve(`${pn}/${PACKAGE_JSON}`)
     const ak = getAliasKey(lmn)
     const rd = normalizePath(pjp).replace(PACKAGE_JSON, SRC)
     return [
@@ -254,7 +254,7 @@ const getDevAlias = () => {
   getPkgPathes().forEach(
     (pp) => {
       const pjp = resolve(pp, PACKAGE_JSON)
-      const { name } = require(pjp)
+      const { name } = rq(pjp)
       const ak = getAliasKey(name)
       alias[ak] = normalizePath(pjp).replace(PACKAGE_JSON, SRC)
     }
@@ -265,7 +265,7 @@ const getDevAlias = () => {
 const getExternal = cached(
   (lmn) => [
     ...Object.keys(getPkgInfoFromLmn(lmn).dependencies || {}).map((dep) => new RegExp('^' + dep + '(/.+)?$')),
-    localModuleNameRegExp,
+    new RegExp(`^${config.scope}/`),
     routesModuleNameRegExp
   ]
 )
@@ -292,33 +292,40 @@ const stringify = (payload: any, replacer?: (key: string | number, value: any) =
   }
 }
 
-const config: MFConfig = await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default)
+let config: MFConfig
 
-const require = createRequire(resolve(PACKAGE_JSON))
-
-config.scope[0] !== '@' && (config.scope = '@' + config.scope)
-config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
-config.glob = config.glob || [getPkgPathes().map((pattern: string) => pattern + '**')]
-const dac = {
-  predicate: () => true,
-  vite: () => ({}),
-  packages: getPkgNames()
-}
-config.apps.forEach(
-  async (app) => {
-    app.predicate = app.predicate || dac.predicate
-    app.vite = app.vite || dac.vite
-    app.packages = app.packages || dac.packages
+const resolveConfig = once(
+  async (ic?: MFConfig) => {
+    config = ic || (await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default))
+    config.scope[0] !== '@' && (config.scope = '@' + config.scope)
+    config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
+    config.glob = config.glob || [getPkgPathes().map((pattern: string) => pattern + '**')]
+    const dac = {
+      predicate: () => true,
+      vite: () => ({}),
+      packages: getPkgNames()
+    }
+    config.apps.forEach(
+      async (app) => {
+        app.predicate = app.predicate || dac.predicate
+        app.vite = app.vite || dac.vite
+        app.packages = app.packages || dac.packages
+      }
+    )
+    return config
   }
 )
 
-const localModuleNameRegExp = new RegExp(`^${config.scope}/`)
+const rq = createRequire(resolve(PACKAGE_JSON))
+
 const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
 
 export {
   PACKAGE_JSON,
   config,
-  require,
+  resolveConfig,
+  rq,
+  once,
   cached,
   isPkg,
   isPage,

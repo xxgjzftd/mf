@@ -2,13 +2,14 @@ import vite from 'vite'
 import { URL } from 'url'
 
 import { entry, routes } from 'src/plugins.js'
-import { config, getRoutesMoudleNames, getNormalizedPath, getDevAlias } from 'src/utils.js'
+import { resolveConfig, getRoutesMoudleNames, getNormalizedPath, getDevAlias } from 'src/utils.js'
 import * as utils from 'src/utils'
 
 import type { AddressInfo } from 'net'
 
 const serve = async (mode?: string) => {
   const appNameToOriginMap: Record<string, string> = {}
+  const config = await resolveConfig()
   return Promise.all(
     config.apps.map(
       async (app) => {
