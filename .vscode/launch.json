@@ -11,8 +11,7 @@
       "skipFiles": ["<node_internals>/**"],
       "type": "pwa-node",
       "args": ["${fileBasename}", "--runInBand", "--detectOpenHandles"],
-      "cwd": "${workspaceFolder}/packages/builder",
-      "runtimeArgs": ["--experimental-vm-modules"]
+      "cwd": "${workspaceFolder}/packages/builder"
     }
   ]
 }

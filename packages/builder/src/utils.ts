@@ -76,6 +76,12 @@ const ROUTES_PACKAGE_NAME = '@mf/routes'
 const PACKAGE_JSON = 'package.json'
 const SRC = 'src'
 
+const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
+
+let config: MFConfig
+
+const rq = createRequire(resolve(PACKAGE_JSON))
+
 const once = <T extends (...args: any) => any>(fn: T): T => {
   let res: ReturnType<T>
   return function (this: ThisParameterType<T>, ...args) {
@@ -87,6 +93,28 @@ const cached = <T extends (string: string) => any>(fn: T) => {
   const cache: Record<string, ReturnType<T>> = Object.create(null)
   return ((string) => cache[string] || (cache[string] = fn(string))) as T
 }
+
+const resolveConfig = once(
+  async (ic?: MFConfig) => {
+    config = ic || (await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default))
+    config.scope[0] !== '@' && (config.scope = '@' + config.scope)
+    config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
+    config.glob = config.glob || [getPkgPathes().map((pattern: string) => pattern + '**')]
+    const dac = {
+      predicate: () => true,
+      vite: () => ({}),
+      packages: getPkgNames()
+    }
+    config.apps.forEach(
+      async (app) => {
+        app.predicate = app.predicate || dac.predicate
+        app.vite = app.vite || dac.vite
+        app.packages = app.packages || dac.packages
+      }
+    )
+    return config
+  }
+)
 
 const isPkg = cached((lmn) => getPkgName(lmn) === lmn)
 const isPage = cached((path) => !!getRoutesMoudleNames(path).length)
@@ -291,34 +319,6 @@ const stringify = (payload: any, replacer?: (key: string | number, value: any) =
       return JSON.stringify(payload)
   }
 }
-
-let config: MFConfig
-
-const resolveConfig = once(
-  async (ic?: MFConfig) => {
-    config = ic || (await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default))
-    config.scope[0] !== '@' && (config.scope = '@' + config.scope)
-    config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
-    config.glob = config.glob || [getPkgPathes().map((pattern: string) => pattern + '**')]
-    const dac = {
-      predicate: () => true,
-      vite: () => ({}),
-      packages: getPkgNames()
-    }
-    config.apps.forEach(
-      async (app) => {
-        app.predicate = app.predicate || dac.predicate
-        app.vite = app.vite || dac.vite
-        app.packages = app.packages || dac.packages
-      }
-    )
-    return config
-  }
-)
-
-const rq = createRequire(resolve(PACKAGE_JSON))
-
-const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
 
 export {
   PACKAGE_JSON,
