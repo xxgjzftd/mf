@@ -13,6 +13,7 @@ import {
   PACKAGE_JSON,
   resolveConfig,
   rq,
+  once,
   cached,
   isPage,
   isLocalModule,
@@ -41,7 +42,7 @@ import type { OutputChunk } from 'rollup'
 import type { Plugin, UserConfig } from 'vite'
 import type { PackageJson } from 'type-fest'
 
-interface MetaModuleInfo {
+export interface MetaModuleInfo {
   js: string
   css?: string
   sources?: string[]
@@ -52,12 +53,12 @@ interface MetaModules {
   [mn: string]: MetaModuleInfo
 }
 
-interface Meta {
+export interface Meta {
   modules: MetaModules
   hash?: string
   version?: string
 }
-interface Source {
+export interface Source {
   status: 'A' | 'M' | 'D'
   path: string
 }
@@ -66,21 +67,191 @@ interface DepInfo {
   dependents: string[]
 }
 
+const SEP = '$mf'
+const ROUTES = 'routes'
+const VENDOR = 'vendor'
+
 let building = false
+
+const getMeta = once(
+  async (isLocal: boolean, BASE: string, DIST: string) => {
+    let meta: Meta
+    try {
+      if (isLocal) {
+        meta = rq(resolve(DIST, `meta.json`))
+      } else {
+        meta = await axios.get(`${BASE}meta.json`).then((res) => res.data)
+      }
+    } catch (error) {
+      meta = { modules: {} }
+    }
+    // meta.json maybe empty
+    meta.modules = meta.modules || {}
+    return meta
+  }
+)
+
+const getSources = once(
+  (meta: Meta) => {
+    let sources: Source[] = []
+    if (meta.hash && meta.version === VERSION) {
+      const { stdout } = execa.sync('git', ['diff', meta.hash, 'HEAD', '--name-status'])
+      sources = stdout
+        .split('\n')
+        .map(
+          (info) => {
+            const [status, path] = info.split('\t')
+            return { status, path } as Source
+          }
+        )
+        .filter(({ path }) => getSrcPathes().includes(path))
+    } else {
+      sources = getSrcPathes().map(
+        (path) => {
+          return { status: 'A', path }
+        }
+      )
+    }
+    return sources
+  }
+)
+
+export interface PluginContext {
+  shouldVersioned(vendor: string): boolean
+  importerToVendorToVersionedVendorMapMap: Record<string, Record<string, string>>
+  getModuleInfo(mn: string): MetaModuleInfo
+  meta: Meta
+  sources: Source[]
+}
+
+const plugins = {
+  meta (mn: string, pc: PluginContext): Plugin {
+    return {
+      name: 'mf-meta',
+      async renderChunk (code, chunk) {
+        const { importedBindings } = chunk
+        const pending: [string, string][] = []
+        Object.keys(importedBindings).forEach(
+          (imported) => {
+            if (isVendorModule(imported)) {
+              let vendor = getVendor(imported)
+              if (imported.length > vendor.length || pc.shouldVersioned(vendor)) {
+                pending.push([imported, vendor])
+              }
+            }
+          }
+        )
+        if (pending.length) {
+          await init
+          const [imports] = parse(code)
+          const ms = new MagicString(code)
+          pending.forEach(
+            ([imported, vendor]) => {
+              imports.forEach(
+                ({ n, ss, se }) => {
+                  if (n === imported) {
+                    const bindings = importedBindings[imported]
+                    let content = code.slice(ss, se).replace(/\n/g, ' ')
+                    if (imported.length > vendor.length) {
+                      if (bindings.length) {
+                        const bindingToNameMap: Record<string, string> = {}
+                        const d = content.match(/(?<=^import).+?(?=from)/)![0].trim()
+                        const m = d.match(/^{(.+)}$/)
+                        if (m) {
+                          m[1]
+                            .split(',')
+                            .map(
+                              (s) =>
+                                s
+                                  .trim()
+                                  .split(' as ')
+                                  .map((v) => v.trim())
+                            )
+                            .forEach(([binding, name]) => (bindingToNameMap[binding] = name || binding))
+                        } else if (d[0] === '*') {
+                          bindingToNameMap['*'] = d.split(' as ')[1].trim()
+                        } else {
+                          bindingToNameMap.default = d
+                        }
+
+                        content =
+                          `import { ` +
+                          bindings
+                            .map(
+                              (binding) =>
+                                `${imported}/${binding}`.replace(/\W/g, SEP) + ` as ${bindingToNameMap[binding]}`
+                            )
+                            .join(',') +
+                          ` } from "${vendor}"`
+                      } else {
+                        content = `import "${vendor}"`
+                      }
+                    }
+                    if (pc.shouldVersioned(vendor)) {
+                      content = content.replace(
+                        new RegExp(`(["'])${vendor}\\1`),
+                        `"${pc.importerToVendorToVersionedVendorMapMap[getVendor(mn)][vendor]}"`
+                      )
+                    }
+                    ms.overwrite(ss, se, content)
+                  }
+                }
+              )
+            }
+          )
+          return {
+            code: ms.toString(),
+            map: ms.generateMap({ hires: true })
+          }
+        }
+        return null
+      },
+      generateBundle (_, bundle) {
+        const info = pc.getModuleInfo(mn)
+        const fileNames = Object.keys(bundle)
+        const js = fileNames.find((fileName) => (bundle[fileName] as OutputChunk).isEntry)!
+        const css = fileNames.find((fileName) => fileName.endsWith('.css'))
+        info.js = js
+        css && (info.css = css)
+        const { importedBindings } = bundle[js] as OutputChunk
+        info.imports = {}
+        Object.keys(importedBindings).forEach(
+          (imported) => {
+            if (isVendorModule(imported)) {
+              const rbs = importedBindings[imported]
+              const vendor = getVendor(imported)
+              const vv = pc.importerToVendorToVersionedVendorMapMap[getVendor(mn)][vendor]
+              const bindings = (info.imports[vv] = info.imports[vv] || [])
+              const prefix = imported.length > vendor.length || !rbs.length ? imported + '/' : ''
+              rbs.length ? rbs.forEach((rb) => bindings.push(prefix + rb)) : bindings.push(prefix)
+            }
+            if (
+              isLocalModule(imported) &&
+              !pc.meta.modules[imported] &&
+              !pc.sources.find((source) => getLocalModuleName(source.path) === imported)
+            ) {
+              throw new Error(
+                `'${imported}' is imported by '${mn}',` +
+                  `but it doesn't exist.\n` +
+                  `please check if ${getLocalModulePath(imported)} exists.`
+              )
+            }
+          }
+        )
+      }
+    }
+  }
+}
 
 const build = async (mode?: string) => {
   building = true
-  let meta: Meta
 
   const config = await vite.resolveConfig({ mode }, 'build')
   const mc = await resolveConfig()
 
-  const SEP = '$mf'
   const BASE = config.base
   const DIST = config.build.outDir
   const ASSETS = config.build.assetsDir
-  const ROUTES = 'routes'
-  const VENDOR = 'vendor'
 
   const isLocal = BASE === '/'
 
@@ -90,37 +261,10 @@ const build = async (mode?: string) => {
       app.packages = Array.isArray(app.packages) ? app.packages : app.packages!(getPkgNames(), utils)
     }
   )
-  try {
-    if (isLocal) {
-      meta = rq(resolve(DIST, `meta.json`))
-    } else {
-      meta = await axios.get(`${BASE}meta.json`).then((res) => res.data)
-    }
-  } catch (error) {
-    meta = { modules: {} }
-  }
-  // meta.json maybe empty
-  meta.modules = meta.modules || {}
 
-  let sources: Source[] = []
-  if (meta.hash && meta.version === VERSION) {
-    const { stdout } = execa.sync('git', ['diff', meta.hash, 'HEAD', '--name-status'])
-    sources = stdout
-      .split('\n')
-      .map(
-        (info) => {
-          const [status, path] = info.split('\t')
-          return { status, path } as Source
-        }
-      )
-      .filter(({ path }) => getSrcPathes().includes(path))
-  } else {
-    sources = getSrcPathes().map(
-      (path) => {
-        return { status: 'A', path }
-      }
-    )
-  }
+  const meta: Meta = await getMeta(isLocal, BASE, DIST)
+  const sources = getSources(meta)
+
   !sources.length && exit()
   await execa('yarn').stdout?.pipe(stdout)
   meta.hash = execa.sync('git', ['rev-parse', '--short', 'HEAD']).stdout
@@ -153,7 +297,7 @@ const build = async (mode?: string) => {
   const versionedVendorToPkgInfoMap: Record<string, PackageJson> = {}
   const versionedVendorToPkgJsonPathMap: Record<string, string> = {}
   const versionedVendorToImportersMap: Record<string, string[]> = {}
-  const importerToVendorToVersionedVendorMapMap: Record<string, Record<string, string>> = {}
+  const importerToVendorToVersionedVendorMapMap: PluginContext['importerToVendorToVersionedVendorMapMap'] = {}
 
   const getPkgJsonPathFromImporter = cached(
     (importer) =>
@@ -269,123 +413,12 @@ const build = async (mode?: string) => {
 
   const pvv2bm = getVersionedVendorToBindingsMap(true)
 
-  const plugins = {
-    meta (mn: string): Plugin {
-      return {
-        name: 'mf-meta',
-        async renderChunk (code, chunk) {
-          const { importedBindings } = chunk
-          const pending: [string, string][] = []
-          Object.keys(importedBindings).forEach(
-            (imported) => {
-              if (isVendorModule(imported)) {
-                let vendor = getVendor(imported)
-                if (imported.length > vendor.length || vendorToVersionedVendorsMap[vendor].length > 1) {
-                  pending.push([imported, vendor])
-                }
-              }
-            }
-          )
-          if (pending.length) {
-            await init
-            const [imports] = parse(code)
-            const ms = new MagicString(code)
-            pending.forEach(
-              ([imported, vendor]) => {
-                imports.forEach(
-                  ({ n, ss, se }) => {
-                    if (n === imported) {
-                      const bindings = importedBindings[imported]
-                      let content = code.slice(ss, se).replace(/\n/g, ' ')
-                      if (imported.length > vendor.length) {
-                        if (bindings.length) {
-                          const bindingToNameMap: Record<string, string> = {}
-                          const d = content.match(/(?<=^import).+?(?=from)/)![0].trim()
-                          const m = d.match(/^{(.+)}$/)
-                          if (m) {
-                            m[1]
-                              .split(',')
-                              .map(
-                                (s) =>
-                                  s
-                                    .trim()
-                                    .split(' as ')
-                                    .map((v) => v.trim())
-                              )
-                              .forEach(([binding, name]) => (bindingToNameMap[binding] = name || binding))
-                          } else if (d[0] === '*') {
-                            bindingToNameMap['*'] = d.split(' as ')[1].trim()
-                          } else {
-                            bindingToNameMap.default = d
-                          }
-
-                          content =
-                            `import { ` +
-                            bindings
-                              .map(
-                                (binding) =>
-                                  `${imported}/${binding}`.replace(/\W/g, SEP) + ` as ${bindingToNameMap[binding]}`
-                              )
-                              .join(',') +
-                            `} from "${vendor}"`
-                        } else {
-                          content = `import "${vendor}"`
-                        }
-                      }
-                      if (vendorToVersionedVendorsMap[vendor].length > 1) {
-                        content = content.replace(
-                          new RegExp(`(["'])${vendor}\\1`),
-                          `"${importerToVendorToVersionedVendorMapMap[getVendor(mn)][vendor]}"`
-                        )
-                      }
-                      ms.overwrite(ss, se, content)
-                    }
-                  }
-                )
-              }
-            )
-            return {
-              code: ms.toString(),
-              map: ms.generateMap({ hires: true })
-            }
-          }
-          return null
-        },
-        generateBundle (_, bundle) {
-          const info = getModuleInfo(mn)
-          const fileNames = Object.keys(bundle)
-          const js = fileNames.find((fileName) => (bundle[fileName] as OutputChunk).isEntry)!
-          const css = fileNames.find((fileName) => fileName.endsWith('.css'))
-          info.js = js
-          css && (info.css = css)
-          const { importedBindings } = bundle[js] as OutputChunk
-          info.imports = {}
-          Object.keys(importedBindings).forEach(
-            (imported) => {
-              if (isVendorModule(imported)) {
-                const rbs = importedBindings[imported]
-                const vendor = getVendor(imported)
-                const vv = importerToVendorToVersionedVendorMapMap[getVendor(mn)][vendor]
-                const bindings = (info.imports[vv] = info.imports[vv] || [])
-                const prefix = imported.length > vendor.length || !rbs.length ? imported + '/' : ''
-                rbs.length ? rbs.forEach((rb) => bindings.push(prefix + rb)) : bindings.push(prefix)
-              }
-              if (
-                isLocalModule(imported) &&
-                !meta.modules[imported] &&
-                !sources.find((source) => getLocalModuleName(source.path) === imported)
-              ) {
-                throw new Error(
-                  `'${imported}' is imported by '${mn}',` +
-                    `but it doesn't exist.\n` +
-                    `please check if ${getLocalModulePath(imported)} exists.`
-                )
-              }
-            }
-          )
-        }
-      }
-    }
+  const pc: PluginContext = {
+    shouldVersioned: (vendor) => vendorToVersionedVendorsMap[vendor].length > 1,
+    importerToVendorToVersionedVendorMapMap,
+    getModuleInfo,
+    meta,
+    sources
   }
 
   const builder = {
@@ -473,7 +506,7 @@ const build = async (mode?: string) => {
                     }
                   }
                 },
-                plugins.meta(vv)
+                plugins.meta(vv, pc)
               ]
             }
           )
@@ -541,7 +574,7 @@ const build = async (mode?: string) => {
                 return null
               }
             },
-            plugins.meta(lmn)
+            plugins.meta(lmn, pc)
           ]
         }
         const pn = getPkgName(lmn)
@@ -582,7 +615,7 @@ const build = async (mode?: string) => {
                 }
               },
               routes(),
-              plugins.meta(rmn)
+              plugins.meta(rmn, pc)
             ]
           }
         )
@@ -689,14 +722,10 @@ const build = async (mode?: string) => {
     Object.keys(cvv2bm)
       .filter((vv) => !versionedVendorToDepInfoMap[vv].dependencies.length)
       .map(builder.vendor)
-  ).catch(
-    (reason) => {
-      console.log(reason)
-    }
   )
 
   await builder.entry()
   await writeFile(resolve(DIST, `meta.json`), JSON.stringify(meta))
 }
 
-export { building, build }
+export { SEP, building, plugins, build }
