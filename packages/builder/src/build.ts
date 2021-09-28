@@ -118,10 +118,18 @@ const getSources = once(
 
 export interface PluginContext {
   shouldVersioned(vendor: string): boolean
+  versionedVendorToImportersMap: Record<string, string[]>
   importerToVendorToVersionedVendorMapMap: Record<string, Record<string, string>>
   getModuleInfo(mn: string): MetaModuleInfo
+  getPkgJsonPathFromImporter(importer: string): string
   meta: Meta
   sources: Source[]
+}
+
+export interface VendorPluginContext extends PluginContext {
+  input: string
+  vendor: string
+  curBindings: string[]
 }
 
 const plugins = {
@@ -240,6 +248,91 @@ const plugins = {
         )
       }
     }
+  },
+  vendor (vv: string, vpc: VendorPluginContext): Plugin {
+    return {
+      name: 'mf-vendor',
+      enforce: 'pre',
+      resolveId (source, importer, options) {
+        if (source === vpc.input) {
+          return VENDOR
+        } else if (importer === VENDOR) {
+          return this.resolve(
+            source,
+            vpc.getPkgJsonPathFromImporter(vpc.versionedVendorToImportersMap[vv][0]),
+            Object.assign({ skipSelf: true }, options)
+          )
+        }
+        return null
+      },
+      load (id) {
+        if (id === VENDOR) {
+          let names: string[] = []
+          let subs: string[] = []
+          vpc.curBindings.forEach((binding) => (binding.includes('/') ? subs.push(binding) : names.push(binding)))
+          return (
+            (names.length
+              ? names.includes('*')
+                ? `export * from "${vpc.vendor}";`
+                : `export { ${names.toString()} } from "${vpc.vendor}";`
+              : '') +
+            subs
+              .map(
+                (sub) => {
+                  const index = sub.lastIndexOf('/')
+                  const path = sub.slice(0, index)
+                  const binding = sub.slice(index + 1)
+                  const name = sub.replace(/\W/g, SEP)
+                  return binding
+                    ? binding === '*'
+                      ? `export * as ${name} from "${path}";`
+                      : `export { ${binding} as ` + `${name} } from "${path}";`
+                    : `import "${path}";`
+                }
+              )
+              .join('\n')
+          )
+        }
+      }
+    }
+  },
+  lib (lmn: string, pc: PluginContext): Plugin {
+    return {
+      name: 'mf-lib',
+      async resolveId (source, importer, options) {
+        if (source.startsWith('\0')) {
+          return null
+        }
+        if (!source.startsWith('.') && !isAbsolute(source)) {
+          throw new Error(
+            `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
+              `but it isn't declared in the dependencies field of the ` +
+              resolve(getPkgJsonPath(lmn))
+          )
+        }
+        const resolution = await this.resolve(source, importer, Object.assign({ skipSelf: true }, options))
+        if (resolution) {
+          const path = getNormalizedPath(resolution.id)
+          if (getPkgPathFromLmn(lmn) !== getPkgPathFromPath(path)) {
+            throw new Error(
+              `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
+                `importing source cross package is not allowed.`
+            )
+          }
+          if (importer && isIndependentModule(path)) {
+            return {
+              id: getLocalModuleName(path)!,
+              external: true
+            }
+          }
+          const mi = pc.getModuleInfo(lmn)
+          mi.sources = mi.sources || []
+          mi.sources.push(path)
+          return resolution
+        }
+        return null
+      }
+    }
   }
 }
 
@@ -296,7 +389,7 @@ const build = async (mode?: string) => {
 
   const versionedVendorToPkgInfoMap: Record<string, PackageJson> = {}
   const versionedVendorToPkgJsonPathMap: Record<string, string> = {}
-  const versionedVendorToImportersMap: Record<string, string[]> = {}
+  const versionedVendorToImportersMap: PluginContext['versionedVendorToImportersMap'] = {}
   const importerToVendorToVersionedVendorMapMap: PluginContext['importerToVendorToVersionedVendorMapMap'] = {}
 
   const getPkgJsonPathFromImporter = cached(
@@ -414,11 +507,13 @@ const build = async (mode?: string) => {
   const pvv2bm = getVersionedVendorToBindingsMap(true)
 
   const pc: PluginContext = {
-    shouldVersioned: (vendor) => vendorToVersionedVendorsMap[vendor].length > 1,
+    meta,
+    sources,
+    versionedVendorToImportersMap,
     importerToVendorToVersionedVendorMapMap,
     getModuleInfo,
-    meta,
-    sources
+    shouldVersioned: (vendor) => vendorToVersionedVendorsMap[vendor].length > 1,
+    getPkgJsonPathFromImporter
   }
 
   const builder = {
@@ -458,56 +553,7 @@ const build = async (mode?: string) => {
                   external: info.dependencies.map((dep) => new RegExp('^' + dep + '(/.+)?$'))
                 }
               },
-              plugins: [
-                {
-                  name: 'mf-vendor',
-                  enforce: 'pre',
-                  resolveId (source, importer, options) {
-                    if (source === input) {
-                      return VENDOR
-                    } else if (importer === VENDOR) {
-                      return this.resolve(
-                        source,
-                        getPkgJsonPathFromImporter(versionedVendorToImportersMap[vv][0]),
-                        Object.assign({ skipSelf: true }, options)
-                      )
-                    }
-                    return null
-                  },
-                  load (id) {
-                    if (id === VENDOR) {
-                      let names: string[] = []
-                      let subs: string[] = []
-                      curBindings.forEach(
-                        (binding) => (binding.includes('/') ? subs.push(binding) : names.push(binding))
-                      )
-                      return (
-                        (names.length
-                          ? names.includes('*')
-                            ? `export * from "${vendor}";`
-                            : `export { ${names.toString()} } from "${vendor}";`
-                          : '') +
-                        subs
-                          .map(
-                            (sub) => {
-                              const index = sub.lastIndexOf('/')
-                              const path = sub.slice(0, index)
-                              const binding = sub.slice(index + 1)
-                              const name = sub.replace(/\W/g, SEP)
-                              return binding
-                                ? binding === '*'
-                                  ? `export * as ${name} from "${path}";`
-                                  : `export { ${binding} as ` + `${name} } from "${path}";`
-                                : `import "${path}";`
-                            }
-                          )
-                          .join('\n')
-                      )
-                    }
-                  }
-                },
-                plugins.meta(vv, pc)
-              ]
+              plugins: [plugins.vendor(vv, Object.assign({ input, vendor, curBindings }, pc)), plugins.meta(vv, pc)]
             }
           )
         }
@@ -537,45 +583,7 @@ const build = async (mode?: string) => {
               external: getExternal(lmn)
             }
           },
-          plugins: [
-            {
-              name: 'mf-lib',
-              async resolveId (source, importer, options) {
-                if (source.startsWith('\0')) {
-                  return null
-                }
-                if (!source.startsWith('.') && !isAbsolute(source)) {
-                  throw new Error(
-                    `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
-                      `but it isn't declared in the dependencies field of the ` +
-                      resolve(getPkgJsonPath(lmn))
-                  )
-                }
-                const resolution = await this.resolve(source, importer, Object.assign({ skipSelf: true }, options))
-                if (resolution) {
-                  const path = getNormalizedPath(resolution.id)
-                  if (getPkgPathFromLmn(lmn) !== getPkgPathFromPath(path)) {
-                    throw new Error(
-                      `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
-                        `importing source cross package is not allowed.`
-                    )
-                  }
-                  if (importer && isIndependentModule(path)) {
-                    return {
-                      id: getLocalModuleName(path)!,
-                      external: true
-                    }
-                  }
-                  const mi = getModuleInfo(lmn)
-                  mi.sources = mi.sources || []
-                  mi.sources.push(path)
-                  return resolution
-                }
-                return null
-              }
-            },
-            plugins.meta(lmn, pc)
-          ]
+          plugins: [plugins.lib(lmn, pc), plugins.meta(lmn, pc)]
         }
         const pn = getPkgName(lmn)
         const app = mc.apps.find((app) => (app.packages as string[]).includes(pn))
@@ -728,4 +736,4 @@ const build = async (mode?: string) => {
   await writeFile(resolve(DIST, `meta.json`), JSON.stringify(meta))
 }
 
-export { SEP, building, plugins, build }
+export { SEP, VENDOR, building, plugins, build }

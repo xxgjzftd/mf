@@ -24,7 +24,7 @@ it('should works correctly', async () => {
   const importerToVendorToVersionedVendorMapMap: PluginContext['importerToVendorToVersionedVendorMapMap'] = {}
   importerToVendorToVersionedVendorMapMap[lmn] = { vue: 'vue@3.0.0', lodash: 'lodash@4.0.0', echarts: 'echarts@5.0.0' }
   const sources: Source[] = []
-  const pc: PluginContext = {
+  const pc: Partial<PluginContext> = {
     getModuleInfo: (mn) => meta.modules[mn],
     shouldVersioned: (vendor) => vendor === 'vue',
     importerToVendorToVersionedVendorMapMap,
