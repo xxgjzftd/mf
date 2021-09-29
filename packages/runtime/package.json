@@ -1,6 +1,6 @@
 {
   "name": "@mf/runtime",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "a client side tool set for micro frontend",
   "scripts": {
     "build": "node build.js"
@@ -8,7 +8,12 @@
   "main": "dist/index.js",
   "type": "module",
   "types": "dist/index.d.ts",
-  "files": [],
+  "files": [
+    "dist"
+  ],
   "author": "xxgjzftd <xxgjzftd@gmail.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "es-module-shims": "^1.1.0"
+  }
 }

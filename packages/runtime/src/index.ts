@@ -1,3 +1,5 @@
+import 'es-module-shims'
+
 interface MFModulesInfo {
   js: string
   css?: string
@@ -13,9 +15,10 @@ interface MF {
   start(): Promise<any>
 }
 
-interface Window {
-  mf: MF
-  importShim(mn: string): Promise<any>
+declare global {
+  interface Window {
+    mf: MF
+  }
 }
 
 const relList = document.createElement('link').relList

@@ -5,7 +5,7 @@ esbuild.build(
     bundle: true,
     entryPoints: ['src/index.ts'],
     format: 'iife',
-    minify: false,
+    minify: true,
     outdir: 'dist',
     platform: 'browser',
     target: 'es2017',
