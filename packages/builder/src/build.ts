@@ -396,37 +396,37 @@ const build = async (mode?: string) => {
     (importer) =>
       isLocalModule(importer) ? rq.resolve(`${importer}/${PACKAGE_JSON}`) : versionedVendorToPkgJsonPathMap[importer]
   )
-  const traverseDeps = cached(
-    (importer) => {
-      const pp = getPkgJsonPathFromImporter(importer)
-      const { dependencies = {}, peerDependencies = {} } = rq(pp)
-      const vendorToVersionedVendorMap: Record<string, string> = (importerToVendorToVersionedVendorMapMap[importer] =
-        {})
-      Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
-        (vendor) => {
-          let path = mc.rvpjp && mc.rvpjp(vendor, importer, pp, utils)
-          if (path === false) return
-          if (!path) {
-            const require = createRequire(pp)
-            try {
-              path = require.resolve(`${vendor}/${PACKAGE_JSON}`)
-            } catch (error) {
-              path = vite.normalizePath(require.resolve(vendor)).replace(new RegExp(`(?<=/${vendor}/).+`), PACKAGE_JSON)
-            }
+  const seenDeps: Record<string, true> = {}
+  const traverseDeps = (importer: string) => {
+    if (seenDeps[importer]) return
+    seenDeps[importer] = true
+    const pp = getPkgJsonPathFromImporter(importer)
+    const { dependencies = {}, peerDependencies = {} } = rq(pp)
+    const vendorToVersionedVendorMap: Record<string, string> = (importerToVendorToVersionedVendorMapMap[importer] = {})
+    Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
+      (vendor) => {
+        let path = mc.rvpjp && mc.rvpjp(vendor, importer, pp, utils)
+        if (path === false) return
+        if (!path) {
+          const require = createRequire(pp)
+          try {
+            path = require.resolve(`${vendor}/${PACKAGE_JSON}`)
+          } catch (error) {
+            path = vite.normalizePath(require.resolve(vendor)).replace(new RegExp(`(?<=/${vendor}/).+`), PACKAGE_JSON)
           }
-          const pi = rq(path)
-          const vv = getVersionedVendor(vendor, pi.version)
-          const importers = (versionedVendorToImportersMap[vv] = versionedVendorToImportersMap[vv] || [])
-          importers.push(importer)
-          vendorToVersionedVendorMap[vendor] = vv
-          versionedVendorToPkgInfoMap[vv] = pi
-          versionedVendorToPkgJsonPathMap[vv] = path
-          traverseDeps(vv)
         }
-      )
-      return true
-    }
-  )
+        const pi = rq(path)
+        const vv = getVersionedVendor(vendor, pi.version)
+        const importers = (versionedVendorToImportersMap[vv] = versionedVendorToImportersMap[vv] || [])
+        importers.push(importer)
+        vendorToVersionedVendorMap[vendor] = vv
+        versionedVendorToPkgInfoMap[vv] = pi
+        versionedVendorToPkgJsonPathMap[vv] = path
+        traverseDeps(vv)
+      }
+    )
+    return true
+  }
 
   const versionedVendorToDepInfoMap: Record<string, DepInfo> = {}
 
