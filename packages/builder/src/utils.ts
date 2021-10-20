@@ -1,4 +1,4 @@
-import { readlinkSync } from 'fs'
+import { realpathSync } from 'fs'
 import { pathToFileURL } from 'url'
 import { resolve } from 'path'
 import { createRequire } from 'module'
@@ -172,7 +172,7 @@ const getPkgPathes = once(
   () =>
     fg
       .sync('node_modules/' + config.scope + '/*', { onlyDirectories: true })
-      .map((path) => getNormalizedPath(readlinkSync(path)))
+      .map((path) => getNormalizedPath(realpathSync(path)))
 )
 
 const getPkgNames = once(() => getPkgPathes().map((pp) => rq(resolve(pp, PACKAGE_JSON)).name))
