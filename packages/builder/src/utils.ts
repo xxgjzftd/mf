@@ -74,7 +74,7 @@ export interface MFConfig {
    * @param parent The path of the importer, when importer is a local module. Otherwise, it's the path of importer's package.json.
    * @param utils
    */
-  rvpjp?(vendor: string, importer: string, parent: string, utils: typeof import('./utils')): string | null
+  rvpjp?(vendor: string, importer: string, parent: string, utils: typeof import('./utils')): string | false
 }
 
 const ROUTES_PACKAGE_NAME = '@mf/routes'

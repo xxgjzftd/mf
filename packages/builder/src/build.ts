@@ -405,6 +405,7 @@ const build = async (mode?: string) => {
       Object.keys(Object.assign({}, dependencies, peerDependencies)).forEach(
         (vendor) => {
           let path = mc.rvpjp && mc.rvpjp(vendor, importer, pp, utils)
+          if (path === false) return
           if (!path) {
             const require = createRequire(pp)
             try {
