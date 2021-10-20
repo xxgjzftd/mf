@@ -214,7 +214,7 @@ const getPkgPathFromPath = cached(
           `but it doesn't exist in the workspaces which is specified in the ${resolve('package.json')}`
       )
     }
-    return pp.slice(0, -1)
+    return pp
   }
 )
 
