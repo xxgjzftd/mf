@@ -104,7 +104,7 @@ const resolveConfig = once(
     config = ic || (await import(pathToFileURL(resolve('mf.config.js')).href).then((res) => res.default))
     config.scope[0] !== '@' && (config.scope = '@' + config.scope)
     config.scope[config.scope.length - 1] === '/' && (config.scope = config.scope.slice(0, -1))
-    config.glob = config.glob || [getPkgPathes().map((pattern: string) => pattern + '**')]
+    config.glob = config.glob || [getPkgPathes().map((pattern: string) => pattern + '/**')]
     const dac = {
       predicate: () => true,
       vite: () => ({}),
@@ -171,7 +171,7 @@ const getSrcPathes = once(
 const getPkgPathes = once(
   () =>
     fg
-      .sync('node_modules/' + config.scope + '/*', { onlyDirectories: true, markDirectories: true })
+      .sync('node_modules/' + config.scope + '/*', { onlyDirectories: true })
       .map((path) => getNormalizedPath(readlinkSync(path)))
 )
 
@@ -205,7 +205,7 @@ const getRoutesMoudleNames = cached(
 
 const getPkgPathFromPath = cached(
   (path) => {
-    const pp = getPkgPathes().find((pp) => path.startsWith(pp))
+    const pp = getPkgPathes().find((pp) => path.startsWith(pp + '/'))
     if (!pp) {
       throw new Error(
         `'${path}' is include in the building because of the 'glob' \n` +
