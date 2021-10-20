@@ -18,6 +18,7 @@ esbuild.build(
     entryPoints: ['src/index.ts', 'src/cli.ts'],
     external: Object.keys(pi.dependencies),
     format: 'esm',
+    minify: true,
     outdir,
     platform: 'node',
     target: 'node14.17.0',
