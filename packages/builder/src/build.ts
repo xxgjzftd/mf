@@ -342,6 +342,10 @@ const build = async (mode?: string) => {
   const config = await vite.resolveConfig({ mode }, 'build')
   const mc = await resolveConfig()
 
+  config.build.emptyOutDir = false
+  config.build.commonjsOptions = config.build.commonjsOptions || {}
+  config.build.commonjsOptions.esmExternals = true
+
   const BASE = config.base
   const DIST = config.build.outDir
   const ASSETS = config.build.assetsDir
