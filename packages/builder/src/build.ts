@@ -39,7 +39,7 @@ import { entry, routes } from 'src/plugins'
 import * as utils from 'src/utils'
 
 import type { OutputChunk } from 'rollup'
-import type { Plugin, UserConfig } from 'vite'
+import type { Plugin, InlineConfig } from 'vite'
 import type { PackageJson } from 'type-fest'
 
 export interface MetaModuleInfo {
@@ -341,10 +341,7 @@ const build = async (mode?: string) => {
 
   const config = await vite.resolveConfig({ mode }, 'build')
   const mc = await resolveConfig()
-
-  config.build.emptyOutDir = false
-  config.build.commonjsOptions = config.build.commonjsOptions || {}
-  config.build.commonjsOptions.esmExternals = true
+  const fvc = { build: { emptyOutDir: false, commonjsOptions: { esmExternals: true } } }
 
   const BASE = config.base
   const DIST = config.build.outDir
@@ -541,25 +538,28 @@ const build = async (mode?: string) => {
           const vendor = getUnversionedVendor(vv)
           const input = resolve(VENDOR)
           return vite.build(
-            {
-              mode,
-              publicDir: false,
-              build: {
-                rollupOptions: {
-                  input,
-                  output: {
-                    entryFileNames: `${ASSETS}/${vv}.[hash].js`,
-                    chunkFileNames: `${ASSETS}/${vv}.[hash].js`,
-                    assetFileNames: `${ASSETS}/${vv}.[hash][extname]`,
-                    format: 'es',
-                    manualChunks: {}
-                  },
-                  preserveEntrySignatures: 'allow-extension',
-                  external: info.dependencies.map((dep) => new RegExp('^' + dep + '(/.+)?$'))
-                }
+            vite.mergeConfig(
+              {
+                mode,
+                publicDir: false,
+                build: {
+                  rollupOptions: {
+                    input,
+                    output: {
+                      entryFileNames: `${ASSETS}/${vv}.[hash].js`,
+                      chunkFileNames: `${ASSETS}/${vv}.[hash].js`,
+                      assetFileNames: `${ASSETS}/${vv}.[hash][extname]`,
+                      format: 'es',
+                      manualChunks: {}
+                    },
+                    preserveEntrySignatures: 'allow-extension',
+                    external: info.dependencies.map((dep) => new RegExp('^' + dep + '(/.+)?$'))
+                  }
+                },
+                plugins: [plugins.vendor(vv, Object.assign({ input, vendor, curBindings }, pc)), plugins.meta(vv, pc)]
               },
-              plugins: [plugins.vendor(vv, Object.assign({ input, vendor, curBindings }, pc)), plugins.meta(vv, pc)]
-            }
+              fvc
+            )
           )
         }
       }
@@ -567,7 +567,7 @@ const build = async (mode?: string) => {
     // utils components pages containers
     lib: cached(
       async (lmn) => {
-        const dc: UserConfig = {
+        const dc: InlineConfig = {
           mode,
           publicDir: false,
           resolve: {
@@ -596,103 +596,109 @@ const build = async (mode?: string) => {
           throw new Error(`'${pn}' doesn't have corresponding app.`)
         }
         const uc = app.vite
-        return vite.build(uc ? vite.mergeConfig(dc, uc) : dc)
+        return vite.build(vite.mergeConfig(uc ? vite.mergeConfig(dc, uc) : dc, fvc))
       }
     ),
     routes: cached(
       async (rmn) => {
         const input = resolve(ROUTES)
         return vite.build(
-          {
-            mode,
-            publicDir: false,
-            build: {
-              rollupOptions: {
-                input,
-                output: {
-                  entryFileNames: `${ASSETS}/${rmn}.[hash].js`,
-                  chunkFileNames: `${ASSETS}/${rmn}.[hash].js`,
-                  assetFileNames: `${ASSETS}/${rmn}.[hash][extname]`,
-                  format: 'es'
-                },
-                preserveEntrySignatures: 'allow-extension'
-              }
-            },
-            plugins: [
-              {
-                name: 'mf-routes-build',
-                resolveId (source) {
-                  if (source === input) {
-                    return rmn
-                  }
+          vite.mergeConfig(
+            {
+              mode,
+              publicDir: false,
+              build: {
+                rollupOptions: {
+                  input,
+                  output: {
+                    entryFileNames: `${ASSETS}/${rmn}.[hash].js`,
+                    chunkFileNames: `${ASSETS}/${rmn}.[hash].js`,
+                    assetFileNames: `${ASSETS}/${rmn}.[hash][extname]`,
+                    format: 'es'
+                  },
+                  preserveEntrySignatures: 'allow-extension'
                 }
               },
-              routes(),
-              plugins.meta(rmn, pc)
-            ]
-          }
+              plugins: [
+                {
+                  name: 'mf-routes-build',
+                  resolveId (source) {
+                    if (source === input) {
+                      return rmn
+                    }
+                  }
+                },
+                routes(),
+                plugins.meta(rmn, pc)
+              ]
+            } as InlineConfig,
+            fvc
+          )
         )
       }
     ),
     async entry () {
       return vite.build(
-        {
-          mode,
-          plugins: [
-            {
-              name: 'mf-inject-meta',
-              transformIndexHtml (html) {
-                let importmap: { imports: Record<string, string> } = { imports: {} }
-                const getKey = cached(
-                  (mn) =>
-                    isVendorModule(mn) && vendorToVersionedVendorsMap[getUnversionedVendor(mn)].length === 1
-                      ? getUnversionedVendor(mn)
-                      : mn
-                )
-                const imports = importmap.imports
-                interface MFModulesInfo {
-                  js: string
-                  css?: string
-                  imports: string[]
-                }
-                const mm: Record<string, MFModulesInfo> = {}
-                Object.keys(meta.modules).forEach(
-                  (mn) => {
-                    const key = getKey(mn)
-                    imports[key] = BASE + meta.modules[mn].js
-                    const mfi: MFModulesInfo = (mm[key] = {
-                      js: meta.modules[mn].js,
-                      imports: []
-                    })
-                    meta.modules[mn].css && (mfi.css = meta.modules[mn].css)
-                    Object.keys(meta.modules[mn].imports).forEach((imported) => mfi.imports.push(getKey(imported)))
+        vite.mergeConfig(
+          {
+            mode,
+            plugins: [
+              {
+                name: 'mf-inject-meta',
+                transformIndexHtml (html) {
+                  let importmap: { imports: Record<string, string> } = { imports: {} }
+                  const getKey = cached(
+                    (mn) =>
+                      isVendorModule(mn) && vendorToVersionedVendorsMap[getUnversionedVendor(mn)].length === 1
+                        ? getUnversionedVendor(mn)
+                        : mn
+                  )
+                  const imports = importmap.imports
+                  interface MFModulesInfo {
+                    js: string
+                    css?: string
+                    imports: string[]
                   }
-                )
-
-                return {
-                  html: html.replace(/\<script(.+)type=['"]module['"]/g, '<script$1type="module-shim"'),
-                  tags: [
-                    {
-                      tag: 'script',
-                      attrs: {
-                        type: 'importmap-shim'
-                      },
-                      children: JSON.stringify(importmap)
-                    },
-                    {
-                      tag: 'script',
-                      children:
-                        `window.mf = window.mf || {};` +
-                        `window.mf.base = '${BASE}';` +
-                        `window.mf.modules = ${JSON.stringify(mm)}`
+                  const mm: Record<string, MFModulesInfo> = {}
+                  Object.keys(meta.modules).forEach(
+                    (mn) => {
+                      const key = getKey(mn)
+                      imports[key] = BASE + meta.modules[mn].js
+                      const mfi: MFModulesInfo = (mm[key] = {
+                        js: meta.modules[mn].js,
+                        imports: []
+                      })
+                      meta.modules[mn].css && (mfi.css = meta.modules[mn].css)
+                      Object.keys(meta.modules[mn].imports).forEach((imported) => mfi.imports.push(getKey(imported)))
                     }
-                  ]
+                  )
+
+                  return {
+                    html: html.replace(/\<script(.+)type=['"]module['"]/g, '<script$1type="module-shim"'),
+                    tags: [
+                      {
+                        tag: 'script',
+                        attrs: {
+                          type: 'importmap-shim'
+                        },
+                        children: JSON.stringify(importmap)
+                      },
+                      {
+                        tag: 'script',
+                        children:
+                          `window.mf = window.mf || {};` +
+                          `window.mf.base = '${BASE}';` +
+                          `window.mf.modules = ${JSON.stringify(mm)}`
+                      }
+                    ]
+                  }
                 }
-              }
-            },
-            entry()
-          ]
-        }
+              },
+              entry()
+            ]
+          } as InlineConfig,
+          fvc
+        )
       )
     }
   }
