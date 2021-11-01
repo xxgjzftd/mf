@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from 'path'
+import { resolve } from 'path'
 import { writeFile, rm } from 'fs/promises'
 import { exit, stdout } from 'process'
 import { createRequire } from 'module'
@@ -33,7 +33,6 @@ import {
   getExternal,
   getVersionedVendor,
   getUnversionedVendor,
-  getPkgJsonPath,
   getPkgPathFromPath,
   getPkgPathFromLmn,
   getRoutesMoudleNames
@@ -300,19 +299,10 @@ const plugins = {
       name: 'mf-lib',
       enforce: 'pre',
       async resolveId (source, importer, options) {
-        if (source.startsWith('\0')) {
-          return null
-        }
-        if (!source.startsWith('.') && !isAbsolute(source)) {
-          throw new Error(
-            `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
-              `but it isn't declared in the dependencies field of the ` +
-              resolve(getPkgJsonPath(lmn))
-          )
-        }
         const resolution = await this.resolve(source, importer, Object.assign({ skipSelf: true }, options))
         if (resolution) {
           const path = getNormalizedPath(resolution.id)
+          if (!getSrcPathes().includes(path)) return resolution
           if (getPkgPathFromLmn(lmn) !== getPkgPathFromPath(path)) {
             throw new Error(
               `'${source}' is imported by ${importer || getLocalModulePath(lmn)},` +
