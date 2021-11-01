@@ -77,9 +77,12 @@ export interface MFConfig {
   rvpjp?(vendor: string, importer: string, parent: string, utils: typeof import('./utils')): string | false
 }
 
+const SEP = '$mf'
+const SRC = 'src'
+const ROUTES = 'routes'
+const VENDOR = 'vendor'
 const ROUTES_PACKAGE_NAME = '@mf/routes'
 const PACKAGE_JSON = 'package.json'
-const SRC = 'src'
 
 const routesModuleNameRegExp = new RegExp(`^${ROUTES_PACKAGE_NAME}/`)
 
@@ -326,6 +329,9 @@ const stringify = (payload: any, replacer?: (key: string | number, value: any) =
 }
 
 export {
+  SEP,
+  ROUTES,
+  VENDOR,
   ROUTES_PACKAGE_NAME,
   PACKAGE_JSON,
   config,

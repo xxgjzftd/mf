@@ -7,6 +7,7 @@
   "author": "xxgjzftd <xxgjzftd@gmail.com>",
   "license": "MIT",
   "devDependencies": {
+    "@microsoft/api-extractor": "^7.18.17",
     "@types/jest": "^27.0.2",
     "@types/mock-fs": "^4.13.1",
     "esbuild": "^0.12.24",

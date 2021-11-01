@@ -179,6 +179,6 @@ mf.start = route
 window.addEventListener('popstate', route)
 const pushState = history.pushState
 history.pushState = function (...args) {
-  pushState(...args)
+  pushState.call(history, ...args)
   route()
 }

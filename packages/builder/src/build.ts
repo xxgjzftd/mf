@@ -10,6 +10,9 @@ import MagicString from 'magic-string'
 import { init, parse } from 'es-module-lexer'
 
 import {
+  SEP,
+  ROUTES,
+  VENDOR,
   PACKAGE_JSON,
   resolveConfig,
   rq,
@@ -66,10 +69,6 @@ interface DepInfo {
   dependencies: string[]
   dependents: string[]
 }
-
-const SEP = '$mf'
-const ROUTES = 'routes'
-const VENDOR = 'vendor'
 
 let building = false
 
@@ -299,6 +298,7 @@ const plugins = {
   lib (lmn: string, pc: PluginContext): Plugin {
     return {
       name: 'mf-lib',
+      enforce: 'pre',
       async resolveId (source, importer, options) {
         if (source.startsWith('\0')) {
           return null
@@ -747,4 +747,4 @@ const build = async (mode?: string) => {
   await writeFile(resolve(DIST, `meta.json`), JSON.stringify(meta))
 }
 
-export { SEP, VENDOR, building, plugins, build }
+export { building, plugins, build }
