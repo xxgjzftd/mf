@@ -1,0 +1,26 @@
+{
+  "name": "@xxgjzftd/processor",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "a tool for micro frontend dev and build",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "node ./build.js",
+    "test": "jest"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=14.17.0"
+  },
+  "author": "xxgjzftd <xxgjzftd@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.6.1",
+    "type-fest": "^2.0.0"
+  },
+  "dependencies": {
+    "fast-glob": "^3.2.7"
+  }
+}
