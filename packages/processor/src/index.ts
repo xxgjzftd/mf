@@ -1,8 +1,6 @@
-import { Processor } from 'src/processor'
+import { Processor } from './processor'
 
-export * from 'src/processor'
-export * from 'src/task'
-
-export type { Plugin } from 'src/processor'
+export * from './processor'
+export * from './task'
 
 export default Processor

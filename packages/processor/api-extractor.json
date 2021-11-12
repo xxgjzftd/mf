@@ -3,5 +3,5 @@
 
   "extends": "../../api-extractor.json",
 
-  "mainEntryPointFilePath": "<projectFolder>/lib/index.d.ts"
+  "mainEntryPointFilePath": "<projectFolder>/temp/index.d.ts"
 }

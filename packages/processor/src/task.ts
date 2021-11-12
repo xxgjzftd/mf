@@ -1,5 +1,8 @@
-import type { Context } from 'src/processor'
+import type { Context } from './processor'
 
+/**
+ * @internal
+ */
 export class Task<Action extends Function = Function> {
   constructor (readonly name: string) {}
 

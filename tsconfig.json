@@ -10,11 +10,13 @@
     "moduleResolution": "node",
     "resolveJsonModule": true,
 
+    "declaration": true,
+    "declarationMap": true,
+
     "sourceMap": true,
 
     "esModuleInterop": true,
 
     "target": "esnext"
-  },
-  "include": ["packages/*/src", "packages/*/__tests__"]
+  }
 }

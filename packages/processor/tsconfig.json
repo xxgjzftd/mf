@@ -8,5 +8,6 @@
     "lib": ["esnext"],
     "types": ["jest"],
     "isolatedModules": true
-  }
+  },
+  "include": ["src"]
 }

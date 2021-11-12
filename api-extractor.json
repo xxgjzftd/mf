@@ -10,7 +10,8 @@
   },
 
   "dtsRollup": {
-    "enabled": true
+    "enabled": true,
+    "untrimmedFilePath": "<projectFolder>/dist/index.d.ts"
   },
 
   "newlineKind": "lf",

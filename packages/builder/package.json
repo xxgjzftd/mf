@@ -26,6 +26,7 @@
     "type-fest": "^2.0.0"
   },
   "dependencies": {
+    "@xxgjzftd/processor": "workspace:^0.1.0",
     "axios": "^0.21.1",
     "cac": "^6.7.3",
     "es-module-lexer": "^0.7.1",

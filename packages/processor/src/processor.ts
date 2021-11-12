@@ -1,11 +1,20 @@
-import { Task } from 'src/task'
+import { Task } from './task'
 
+/**
+ * @public
+ */
 export interface Plugin {
   apply(processor: Processor): void
 }
 
+/**
+ * @public
+ */
 export interface Context {}
 
+/**
+ * @public
+ */
 export class Processor {
   /**
    * Indicates if processor is running.
