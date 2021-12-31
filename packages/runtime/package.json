@@ -1,9 +1,12 @@
 {
-  "name": "@xxgjzftd/runtime",
+  "name": "@ugdu/runtime",
   "version": "0.1.1",
   "description": "a client side tool set for micro frontend",
   "scripts": {
-    "build": "node build.js"
+    "build": "run-s build-bundle build-types",
+    "build-bundle": "node ./build.js",
+    "build-types": "tsc --emitDeclarationOnly --outDir temp --project . && api-extractor run --local && rimraf temp",
+    "test": "jest"
   },
   "main": "dist/index.js",
   "type": "module",

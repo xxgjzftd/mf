@@ -1,61 +1,103 @@
-import type { Context } from './processor'
+import { HookDriver } from './hook-driver'
+
+import type { Promisable } from 'type-fest'
+import type { BaseHooks } from './hook-driver'
+
+export class TaskOptions<Hooks extends BaseHooks<Hooks> = {}> {
+  constructor (
+    private readonly _action: (this: Task<Hooks>) => Promisable<void>,
+    private _hooks: Partial<Hooks> = {}
+  ) {}
+
+  get action () {
+    return this._action
+  }
+
+  get hooks () {
+    return this._hooks
+  }
+
+  parents: TaskOptions<Hooks>[] = []
+
+  /**
+   * Add parent to this task options.
+   *
+   * @param parent - The parent task options
+   * @returns The reference of `this`
+   *
+   * @internal
+   */
+  addParent (parent: TaskOptions<Hooks>) {
+    this.parents.push(parent)
+    return this
+  }
+
+  /**
+   * Set hooks of this task options.
+   *
+   * @remarks
+   * This method use the hooks you pass in as the hooks of the task options.
+   * If you want to add instead of replace the hooks, you could call the method like below.
+   *
+   * @example
+   * ```ts
+   * setHooks(Object.assign(this.hooks, yourHooks))
+   * ```
+   *
+   * @param hooks - The hooks to be set
+   * @returns The reference of `this`
+   *
+   */
+  setHooks (hooks: Partial<Hooks>) {
+    this._hooks = hooks
+    return this
+  }
+}
 
 /**
  * @internal
  */
-export class Task<Action extends Function = Function> {
-  constructor (readonly name: string) {}
+export interface TaskManager {
+  context: Context
+  task<Hooks extends BaseHooks<Hooks> = {}>(to: TaskOptions<Hooks>): Task<Hooks>
+}
 
-  actions: Action[] = []
+/**
+ * @public
+ */
+export interface Context {}
 
-  sync = false
+/**
+ * The Task class.
+ *
+ * @remarks
+ * Task class can only be instantiated by {@link TaskManager.task} with {@link TaskOptions}.
+ *
+ * @public
+ */
+export class Task<Hooks extends BaseHooks<Hooks> = {}> extends HookDriver<Hooks> {
+  private _result?: Promisable<void>
 
-  type: 'parallel' | 'sequential' = 'parallel'
-
-  push (action: Action) {
-    return this.actions.push(action)
+  constructor (private readonly _to: TaskOptions<Hooks>, readonly manager: TaskManager) {
+    super()
+    this._to = _to
+    this.manager = manager
+    _to.parents.forEach((p) => this.parents.push(manager.task(p)))
+    ;(Object.entries(_to.hooks) as [keyof Hooks, Hooks[keyof Hooks]][]).forEach(([name, fn]) => this.hook(name, fn))
   }
 
-  pop () {
-    return this.actions.pop()
+  get action () {
+    return this._to.action
   }
 
-  unshift (action: Action) {
-    return this.actions.unshift(action)
+  isCreatedBy (to: TaskOptions<Hooks>): boolean {
+    return this._to === to
   }
 
-  shift () {
-    return this.actions.shift()
-  }
-
-  async run (context: Context) {
-    if (this.sync) {
-      return this.runSync(context)
-    } else {
-      switch (this.type) {
-        case 'parallel':
-          return this.runParallel(context)
-        case 'sequential':
-          return this.runSequential(context)
-        default:
-          throw new Error(`illegal type '${this.type}'`)
-      }
+  async run (force = false) {
+    if (force || !this._result) {
+      this._result = this.action.call(this)
     }
-  }
-
-  private runSync (context: Context) {
-    for (const action of this.actions) {
-      action(context)
-    }
-  }
-
-  private async runParallel (context: Context) {
-    await Promise.all(this.actions.map((action) => action(context)))
-  }
-
-  private async runSequential (context: Context) {
-    for (const action of this.actions) {
-      await action(context)
-    }
+    return this._result
   }
 }

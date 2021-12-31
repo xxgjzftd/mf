@@ -15,7 +15,7 @@ esbuild.build(
     bundle: true,
     splitting: true,
     entryPoints: ['src/index.ts'],
-    external: Object.keys(pi.dependencies),
+    external: Object.keys(pi.dependencies || {}),
     format: 'esm',
     outdir,
     platform: 'node',

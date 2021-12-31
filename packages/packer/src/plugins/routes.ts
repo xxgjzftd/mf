@@ -1,48 +1,41 @@
-import {
-  isRoutesModule,
-  getRoutesMoudleNameToPagesMap,
-  stringify,
-  getLocalModuleName,
-  getRoutesOption,
-  getPkgId,
-  getApps,
-  getAppPkgName,
-  getPkgName,
-  getLocalModulePath
-} from 'src/utils'
-import { building } from 'src/build'
-
 import type { Plugin } from 'vite'
-import type { BaseRoute } from 'src/utils'
+import type { Context } from '@ugdu/processor'
+import type { BaseRoute } from '../config'
 
-const routes = (): Plugin => {
+export const routes = function (rmn: string, context: Context): Plugin {
+  const {
+    CONSTANTS: { ROUTES_INPUT },
+    project,
+    utils: { isRoutesModule, getRoutesOption, getLocalModuleName, getPkgName, getPkgId, stringify }
+  } = context
   return {
-    name: 'mf-routes',
+    name: 'ugdu:routes',
     resolveId (source) {
+      if (source === ROUTES_INPUT) {
+        return rmn
+      }
       if (isRoutesModule(source)) {
         return source
       }
     },
     async load (id) {
       if (isRoutesModule(id)) {
-        const pages = getRoutesMoudleNameToPagesMap()[id]
+        const pages = project.routes[id]
         const option = getRoutesOption(id)
         const depth = option.depth
-        let base = option.base || ''
-        base[0] !== '/' && (base = '/' + base)
-        base[base.length - 1] !== '/' && (base = base + '/')
-        const pnToPagesMap: Record<string, string[]> = {}
+        const base = option.base
+        const pn2pm: Record<string, string[]> = {}
         pages.forEach(
           (path) => {
             const pn = getPkgName(getLocalModuleName(path)!)
-            pnToPagesMap[pn] = pnToPagesMap[pn] || []
-            pnToPagesMap[pn].push(path)
+            pn2pm[pn] = pn2pm[pn] || []
+            pn2pm[pn].push(path)
           }
         )
         const brs: BaseRoute[] = []
-        Object.keys(pnToPagesMap).forEach(
+        Object.keys(pn2pm).forEach(
           (pn) => {
-            const pages = pnToPagesMap[pn]
+            const pages = pn2pm[pn]
             const length = pages.length
             if (!length) {
               return
@@ -61,7 +54,7 @@ const routes = (): Plugin => {
 
                 const br = Object.assign(
                   {
-                    path: raw.replace(/(?<=\/)_/, ':'),
+                    path: raw.replace(/(?<=\/)_/g, ':'),
                     name: raw.slice(1).replace(/\//g, '-'),
                     depth: depth
                   },
@@ -85,7 +78,7 @@ const routes = (): Plugin => {
               const parent = brs.find((inner) => inner.depth === depth && br.path.startsWith(inner.path))
               if (!parent) {
                 throw new Error(
-                  `can not find parent route of '${br.component}',\n` + `the generated path of which is '${br.path}'.`
+                  `Can not find parent route of '${br.component}',\n` + `the generated path of which is '${br.path}'.`
                 )
               }
               parent.children = parent.children || []
@@ -94,6 +87,7 @@ const routes = (): Plugin => {
           }
         )
 
+        const building = !!project.mn2bm
         const code = stringify(
           rrs,
           (key, value) => {
@@ -110,33 +104,3 @@ const routes = (): Plugin => {
     }
   }
 }
-
-const entry = (): Plugin => {
-  return {
-    name: 'mf-entry',
-    transformIndexHtml () {
-      return [
-        {
-          tag: 'script',
-          attrs: {
-            type: building ? 'module-shim' : 'module',
-            noshim: building ? false : true
-          },
-          children:
-            getApps()
-              .map(
-                (app) =>
-                  `mf.register(` +
-                  `"${getAppPkgName(app.name)}", ${stringify(app.predicate)},` +
-                  `()=>${building ? 'mf.load' : 'import'}` +
-                  `("${building ? getAppPkgName(app.name) : '/' + getLocalModulePath(getAppPkgName(app.name))}"));`
-              )
-              .join('') + `mf.start();`,
-          injectTo: 'head'
-        }
-      ]
-    }
-  }
-}
-
-export { routes, entry }

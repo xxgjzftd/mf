@@ -6,7 +6,7 @@
       "src/*": ["src/*"]
     },
     "lib": ["esnext"],
-    "types": ["jest"],
+    "types": ["node"],
     "isolatedModules": true
   },
   "include": ["src"]
