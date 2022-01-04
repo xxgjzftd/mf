@@ -9,7 +9,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "node ./build.js",
+    "build": "run-s build-bundle build-types",
+    "build-bundle": "node ./build.js",
+    "build-types": "tsc --emitDeclarationOnly --outDir temp --project . && api-extractor run --local && rimraf temp",
     "test": "jest"
   },
   "files": [
