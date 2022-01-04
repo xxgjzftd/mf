@@ -1,6 +1,6 @@
 {
   "name": "@ugdu/runtime",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "description": "a client side tool set for micro frontend",
   "scripts": {
     "build": "run-s build-bundle build-types",
