@@ -2,7 +2,7 @@
 
 ## todo
 
-- [ ] d.ts
+- [x] d.ts
 - [ ] document
 - [ ] workflow
 - [ ] ci
